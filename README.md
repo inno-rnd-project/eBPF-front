@@ -1,4 +1,5 @@
 # eBPF GPU Observability — Frontend
+<img width="1757" height="835" alt="image" src="https://github.com/user-attachments/assets/599339f9-dbf8-4754-883d-8702d174b0ae" />
 
 eBPF 기반 GPU 통합 Observability 시스템의 프론트엔드입니다. 커널 레벨에서 수집한 네트워크 지연·패킷 Drop 데이터와 GPU(DCGM) 메트릭을 클러스터 토폴로지 위에서 시각화합니다.
 
