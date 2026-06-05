@@ -6,11 +6,9 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 
-# ✨ [수정] 모든 패키지의 빌드 스크립트(sharp 등) 실행을 허용하는 옵션 추가
-RUN pnpm config set only-built-dependencies '*'
-
+# 💡 [수정] config set 대신 install 명령어 뒤에 옵션을 직접 붙여줍니다.
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+    pnpm install --frozen-lockfile --only-built-dependencies
 
 # 2) 빌드
 FROM node:24-alpine AS builder
