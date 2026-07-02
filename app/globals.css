@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ── 베이스 ────────────────────────────────────────────────────────────────
+   라이트 단일 테마. color-scheme 고정으로 폼 컨트롤·스크롤바가 다크로 뒤집히는
+   것을 막고, body는 평면 색 대신 미세한 틴트 그라데이션으로 깊이를 준다. */
+:root {
+  color-scheme: light;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  color: #0f172a;
+  background:
+    radial-gradient(1100px 520px at 100% -8%, #eef2ff 0%, rgba(238, 242, 255, 0) 55%),
+    linear-gradient(180deg, #fbfcfe 0%, #f3f6fa 100%);
+  background-attachment: fixed;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 지표 숫자는 등폭(tabular)으로 정렬 — 막대/표에서 자릿수가 흔들리지 않게 */
+.font-mono {
+  font-feature-settings: "tnum" 1;
+}
+
+::selection {
+  background: #c7d2fe;
+  color: #1e1b4b;
+}
+
+/* ── 표면(surface) ─────────────────────────────────────────────────────────
+   최상위 카드의 표준 elevation. 헤어라인 보더 + 2단 부드러운 그림자로,
+   틴트된 배경 위에서 카드가 살짝 떠 보이게 한다. 중첩 타일은 이 클래스를
+   쓰지 않고 평면을 유지해 시각적 계층을 만든다. */
+.surface-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+/* ── 스크롤바 — 얇고 조용하게 ─────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
+}
+
+/* ── 포커스 — 키보드 사용자에게만 일관된 링 ──────────────────────────────── */
+:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+/* ── 모션 토큰 ───────────────────────────────────────────────────────────────
+   상용 옵저버빌리티 콘솔(Grafana/Datadog) 관례: 모션은 "조용한 기본 + 이상에만 소비".
+   진입(one-shot)·실시간 갱신·이상 강조를 분리하고, prefers-reduced-motion 에서 전부 정지.
+   keyframe 은 Tailwind v4(설정파일 없음)라 여기 직접 선언하고 평범한 클래스로 노출한다. */
+
+/* 막대 진입 — 폭은 인라인으로 고정하고 scaleX 로만 드러낸다(게이지 hue 보존). */
+@keyframes growx { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+/* 카드·행 진입 — 살짝 떠오르며 페이드 */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* 윤기 띠 — 병목·활성 막대 위를 반투명 흰빛이 한 번 스쳐 지나감 */
+@keyframes shimmer { from { transform: translateX(-120%); } to { transform: translateX(420%); } }
+/* 흐름선 — 토폴로지 링크의 대시 패턴이 from→to 로 흐른다(throughput 방향성) */
+@keyframes flowdash { to { stroke-dashoffset: -240; } }
+/* 라인 드로우 — 토폴로지/스파크라인 진입(one-shot) */
+@keyframes drawline { from { stroke-dashoffset: var(--draw-len, 400); } to { stroke-dashoffset: 0; } }
+/* 임계 링 호흡 — crit 에만 쓰는 유일한 무한 애니메이션 */
+@keyframes breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.12; } }
+/* 셀 갱신 플래시 — 표의 값이 바뀐 직후 잠깐 강조됐다가 사라짐(AG Grid 관례) */
+@keyframes flashbg { from { background-color: var(--flash, rgba(99, 102, 241, 0.16)); } to { background-color: transparent; } }
+/* 라이브 점 — "지금" 지점/LIVE 배지의 잔잔한 맥동 */
+@keyframes liveping { 0% { transform: scale(1); opacity: 0.55; } 70%, 100% { transform: scale(2.4); opacity: 0; } }
+
+.anim-growx { transform-origin: left center; animation: growx 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+.anim-rise { animation: rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+/* 라이브 값 변화 — 폭/색을 부드럽게 글라이드(레이아웃 속성이지만 1s 간격 한정이라 허용) */
+.bar-glide { transition: width 0.85s cubic-bezier(0.22, 0.61, 0.36, 1), background-color 0.4s ease; }
+.dash-glide { transition: stroke-dashoffset 0.85s cubic-bezier(0.22, 0.61, 0.36, 1), stroke 0.4s ease; }
+/* 흐름선 — dasharray 는 인라인, 여기선 방향성 애니메이션만 */
+.flow-line { animation: flowdash 1s linear infinite; }
+.flow-line-slow { animation: flowdash 2.2s linear infinite; }
+.is-crit-breathe { animation: breathe 1.9s ease-in-out infinite; }
+.flash-cell { animation: flashbg 0.9s ease-out; }
+
+/* 윤기 띠 오버레이 — 부모를 relative+overflow-hidden 으로 두고 이 요소를 절대배치 */
+.shimmer-band {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  width: 40%;
+  animation: shimmer 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── 모션 민감 사용자 — 모든 진입/실시간/강조 모션 정지 ──────────────────────
+   verify 권고: 단일 블록으로 keyframe·transition·무한 애니메이션을 전부 무력화. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .shimmer-band { display: none; }
+}
