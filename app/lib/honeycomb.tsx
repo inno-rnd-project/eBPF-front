@@ -51,7 +51,19 @@ function honeycomb(count: number) {
 
 type HoverState = { pod: Pod; anomaly: Anomaly | null; x: number; y: number };
 
-export function PodHoneycomb({ node, fill = "anomaly" }: { node: ClusterNode; fill?: FillKey }) {
+export function PodHoneycomb({
+  node,
+  fill = "anomaly",
+  onSelectPod,
+  selectedPod,
+  matcher,
+}: {
+  node: ClusterNode;
+  fill?: FillKey;
+  onSelectPod?: (pod: Pod) => void; // 지정 시 클릭이 페이지 이동 대신 선택 콜백 (맵의 사이드 패널)
+  selectedPod?: string | null; // 선택된 파드 — 인디고 링으로 강조
+  matcher?: (pod: Pod) => boolean; // 검색 필터 — 불일치 파드는 디밍
+}) {
   const router = useRouter();
   const comb = honeycomb(node.pods.length);
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -77,22 +89,27 @@ export function PodHoneycomb({ node, fill = "anomaly" }: { node: ClusterNode; fi
         {node.pods.map((pod, i) => {
           const cell = comb.cells[i];
           const a = fill === "anomaly" ? podAnomaly(node, pod) : null;
+          const dimmed = matcher ? !matcher(pod) : false;
+          const selected = selectedPod === pod.name;
           return (
             <polygon
               key={pod.name}
               points={hexPath(cell.cx, cell.cy, HEX_R)}
               fill={fillOf(pod)}
-              stroke={a ? SEV_TONE[a.sev].stroke : "#ffffff"}
-              strokeWidth={a ? 1.6 : 1.2}
+              stroke={selected ? "#4f46e5" : a ? SEV_TONE[a.sev].stroke : "#ffffff"}
+              strokeWidth={selected ? 2.6 : a ? 1.6 : 1.2}
+              opacity={dimmed ? 0.15 : 1}
               className={`cursor-pointer transition-[fill,opacity] duration-200 hover:opacity-70 ${
-                a?.sev === "crit" ? "animate-pulse" : ""
+                a?.sev === "crit" && !dimmed ? "animate-pulse" : ""
               }`}
               aria-label={pod.name}
               onMouseEnter={(e) =>
                 setHover({ pod, anomaly: podAnomaly(node, pod), x: e.clientX, y: e.clientY })
               }
               onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))}
-              onClick={() => router.push(`/clusters/${node.name}/${pod.name}`)}
+              onClick={() =>
+                onSelectPod ? onSelectPod(pod) : router.push(`/clusters/${node.name}/${pod.name}`)
+              }
             />
           );
         })}
@@ -166,7 +183,7 @@ function PodTooltip({ pod, anomaly, x, y }: HoverState) {
       ) : null}
 
       {!noData ? (
-        <p className="mt-2 text-[10px] text-slate-500">클릭하면 상세 분석 →</p>
+        <p className="mt-2 text-[10px] text-slate-500">클릭해서 자세히 보기 →</p>
       ) : null}
     </div>
   );

@@ -7,16 +7,17 @@ import {
   C_WARN,
   DISPLAY_STATUS_TONE,
   getNode,
+  gpuFabric,
   netobsAgentHealth,
   nodeAlerts,
   nodeDiagnosis,
   nodeDropReasons,
   nodeGpu,
-  nodeGpuTopology,
   nodeHealth,
   nodeNetFlow,
   nodeNoisyNeighbors,
   nodeRetransByWorkload,
+  nodeServiceTopology,
   nodeDisplayStatus,
   nodeStageLatency,
   podAnalytics,
@@ -28,7 +29,6 @@ import {
   DropReasonsTable,
   GpuAgentPanel,
   GpuCardGrid,
-  GpuInterconnectPanel,
   GpuPodsByDevice,
   HealthScores,
   NetFlowPanel,
@@ -39,8 +39,10 @@ import {
   ScoreBars,
   StageLatency,
 } from "../../lib/charts";
+import { GpuViews } from "../../lib/gpu-topology";
 import { PodHoneycomb } from "../../lib/honeycomb";
 import { LiveArea, LiveVitals, type VitalTile } from "../../lib/live";
+import { ServiceTopology } from "../../lib/service-topology";
 import { AppShell, EntityHeader, SectionTitle } from "../../lib/shell";
 import { type TabDef, Tabs } from "../../lib/tabs";
 import { Card, LegendHex } from "../../lib/ui";
@@ -54,6 +56,7 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
   const health = nodeHealth(node);
   const alerts = nodeAlerts(node);
   const noisy = nodeNoisyNeighbors(node);
+  const serviceTopo = nodeServiceTopology(node);
 
   const live = node.pods.filter((p) => p.cpu >= 0);
   const analytics = live.map((p) => ({ pod: p, a: podAnalytics(node, p) }));
@@ -166,9 +169,31 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
   let tabs: TabDef[];
   let initialTab: string;
 
+  // 서비스 토폴로지 탭 — 노드의 파드/서비스 관계 그래프 + noisy-neighbor 상세 (GPU·비-GPU 공용).
+  // eBPF(Hubble/Kiali) 관례의 "topology" = 서비스 관계 그래프. down 노드(전부 nodata)면 생략.
+  const topologyTab: TabDef | null = serviceTopo
+    ? {
+        id: "topology",
+        label: "Topology",
+        badge: serviceTopo.linkCount || undefined,
+        content: (
+          <div className="space-y-4">
+            <Card title="서비스 토폴로지 (netobs)" hint="이 노드의 서비스 관계 맵 (레플리카 집계) — 노드=서비스, 크기=파드수·트래픽, 색=상태, 화살표=noisy-neighbor 간섭. 클릭 → 대표 파드.">
+              <ServiceTopology topo={serviceTopo} node={node.name} />
+            </Card>
+            {noisy.length > 0 ? (
+              <Card title="Noisy neighbor — victim_signal 별 (suspect → victim)">
+                <NoisyPanel rows={noisy} />
+              </Card>
+            ) : null}
+          </div>
+        ),
+      }
+    : null;
+
   if (gpu) {
     // ── GPU 노드 = "GPU rack" 관점 탭: GPUs · Pods · Resources · Topology · Events ──
-    const topo = nodeGpuTopology(node, gpu);
+    const fabric = gpuFabric(node, gpu);
 
     tabs = [
       {
@@ -177,8 +202,12 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         badge: gpu.views.length || undefined,
         alert: dim === "gpu",
         content: (
-          <Card title="GPU 디바이스 (gpuobs)" hint="카드/히트맵 클릭 → GPU Detail에서 eBPF 심층 분석">
-            <GpuCardGrid views={gpu.views} node={node.name} />
+          <Card title="GPU 디바이스 (gpuobs)" hint="Grid=디바이스 헬스 · Fabric=인터커넥트 · Matrix=topo -m. 클릭 → GPU Detail">
+            {fabric ? (
+              <GpuViews grid={<GpuCardGrid views={gpu.views} node={node.name} />} fabric={fabric} node={node.name} />
+            ) : (
+              <GpuCardGrid views={gpu.views} node={node.name} />
+            )}
           </Card>
         ),
       },
@@ -203,11 +232,6 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
             <Card title="GPU별 사용 파드" hint="이 노드의 GPU들에 어떤 파드가 올라가 있나 — 디바이스별 귀속">
               <GpuPodsByDevice gpu={gpu} node={node.name} />
             </Card>
-            {noisy.length > 0 ? (
-              <Card title="Noisy neighbor — victim_signal 별 (suspect → victim)">
-                <NoisyPanel rows={noisy} />
-              </Card>
-            ) : null}
           </div>
         ),
       },
@@ -242,18 +266,9 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
       },
     ];
 
-    // Topology — NVLink/PCIe 데이터가 있을 때만 (agent down 이면 생략). Events 앞에 삽입.
-    if (topo) {
-      const at = tabs.findIndex((t) => t.id === "events");
-      tabs.splice(at, 0, {
-        id: "topology",
-        label: "Topology",
-        content: (
-          <Card title="GPU 토폴로지 (NVLink · PCIe)" hint="노드 안 GPU들의 인터커넥트 — 두께·색 = 대역폭 점유율">
-            <GpuInterconnectPanel ic={topo} caption="DCGM PCIe/NVLink throughput. 노드의 멀티-GPU 인터커넥트 — GPU 간 NVLink, host(CPU) PCIe 경로 기준." />
-          </Card>
-        ),
-      });
+    if (topologyTab) {
+      const at = tabs.findIndex((t) => t.id === "pods");
+      tabs.splice(at + 1, 0, topologyTab);
     }
 
     initialTab = node.status === "down" ? "events" : "gpus";
@@ -301,16 +316,6 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         content: resourcesContent,
       },
       {
-        id: "noisy",
-        label: "간섭",
-        badge: noisy.length || undefined,
-        content: (
-          <Card title="Noisy neighbor — victim_signal 별 (suspect → victim)">
-            <NoisyPanel rows={noisy} />
-          </Card>
-        ),
-      },
-      {
         id: "agent",
         label: "에이전트",
         alert: !netobs.up,
@@ -332,6 +337,11 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         ),
       },
     ];
+
+    if (topologyTab) {
+      const at = tabs.findIndex((t) => t.id === "pods");
+      tabs.splice(at + 1, 0, topologyTab);
+    }
 
     initialTab = dim === "cpu" || dim === "net" ? dim : node.status === "down" ? "alerts" : "pods";
   }

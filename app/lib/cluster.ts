@@ -57,80 +57,151 @@ function makePods(prefix: string, count: number, c: number, m: number, n: number
   });
 }
 
+// 노드는 여러 개의 "이름 있는 서비스"(각각 파드 레플리카 N개)를 올린다 — 서비스 토폴로지를
+// 직관적으로(서비스명 단위) 그리기 위함. svc(prefix,…) = 한 서비스의 파드 묶음.
+const svc = makePods;
 export const NODES: ClusterNode[] = [
-  { name: "cp-01", role: "control-plane", status: "ready", pods: makePods("kube-system", 18, 30, 42, 25, [5, 12]) },
-  { name: "gpu-01", role: "worker", status: "warning", gpu: true, pods: makePods("app-a", 24, 44, 55, 38, [7, 19]) },
-  { name: "gpu-02", role: "worker", status: "warning", gpu: true, pods: makePods("app-b", 30, 51, 84, 40, [3, 14, 22]) },
-  { name: "worker-03", role: "worker", status: "warning", pods: makePods("app-c", 16, 38, 40, 62, [9]) },
-  { name: "worker-04", role: "worker", status: "down", pods: makePods("app-d", 12, 0, 0, 0, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) },
-  { name: "gpu-03", role: "worker", status: "ready", gpu: true, pods: makePods("app-e", 21, 40, 50, 35, [4, 16]) },
-  { name: "worker-06", role: "worker", status: "ready", pods: makePods("app-f", 14, 27, 33, 30) },
-  { name: "worker-07", role: "worker", status: "ready", pods: makePods("app-g", 9, 35, 48, 28) },
-  { name: "worker-08", role: "worker", status: "ready", pods: makePods("app-h", 6, 41, 50, 33) },
-  { name: "worker-09", role: "worker", status: "ready", pods: makePods("app-i", 3, 22, 30, 20) },
-  { name: "worker-10", role: "worker", status: "warning", pods: makePods("app-j", 19, 48, 56, 44, [6, 13]) },
-  { name: "worker-11", role: "worker", status: "warning", pods: makePods("app-k", 15, 40, 58, 45, [2, 9]) },
-  { name: "worker-12", role: "worker", status: "ready", pods: makePods("app-l", 11, 33, 40, 31) },
-  { name: "worker-13", role: "worker", status: "ready", pods: makePods("app-m", 8, 39, 46, 36) },
-  { name: "worker-14", role: "worker", status: "ready", pods: makePods("app-n", 5, 29, 36, 26) },
-  { name: "worker-15", role: "worker", status: "ready", pods: makePods("app-o", 4, 44, 52, 39) },
-  { name: "worker-16", role: "worker", status: "ready", pods: makePods("app-p", 2, 20, 28, 22) },
+  {
+    name: "cp-01", role: "control-plane", status: "ready",
+    pods: [
+      ...svc("kube-apiserver", 3, 40, 50, 35), ...svc("etcd", 3, 35, 55, 30),
+      ...svc("coredns", 3, 25, 30, 40, [2]), ...svc("kube-proxy", 4, 20, 25, 30),
+      ...svc("scheduler", 2, 22, 28, 20), ...svc("metrics-server", 3, 30, 45, 25, [1]),
+    ],
+  },
+  {
+    name: "gpu-01", role: "worker", status: "warning", gpu: true,
+    pods: [
+      ...svc("llm-inference", 8, 55, 60, 45, [3]), ...svc("embedding-svc", 6, 45, 50, 40),
+      ...svc("triton-router", 5, 40, 45, 50, [4]), ...svc("redis-cache", 5, 30, 70, 35),
+    ],
+  },
+  {
+    name: "gpu-02", role: "worker", status: "warning", gpu: true,
+    pods: [
+      ...svc("vllm-server", 10, 60, 85, 45, [2]), ...svc("reranker", 7, 50, 60, 40, [5]),
+      ...svc("feature-store", 7, 45, 75, 50, [1]), ...svc("kafka-consumer", 6, 40, 55, 60),
+    ],
+  },
+  {
+    name: "worker-03", role: "worker", status: "warning",
+    pods: [
+      ...svc("api-gateway", 5, 38, 40, 62, [3]), ...svc("checkout", 4, 45, 48, 55),
+      ...svc("payments", 4, 50, 45, 65), ...svc("nginx-ingress", 3, 30, 35, 70),
+    ],
+  },
+  {
+    name: "worker-04", role: "worker", status: "down",
+    pods: [...svc("orders", 6, 0, 0, 0, [0, 1, 2, 3, 4, 5]), ...svc("cart", 6, 0, 0, 0, [0, 1, 2, 3, 4, 5])],
+  },
+  {
+    name: "gpu-03", role: "worker", status: "ready", gpu: true,
+    pods: [
+      ...svc("training-worker", 8, 40, 50, 35, [4]), ...svc("data-loader", 6, 45, 48, 40),
+      ...svc("tensorboard", 4, 25, 40, 30, [1]), ...svc("minio", 3, 35, 55, 45),
+    ],
+  },
+  {
+    name: "worker-06", role: "worker", status: "ready",
+    pods: [...svc("frontend", 5, 27, 33, 30), ...svc("catalog", 5, 30, 38, 32), ...svc("sessions", 4, 25, 35, 28)],
+  },
+  {
+    name: "worker-07", role: "worker", status: "ready",
+    pods: [...svc("search", 4, 35, 48, 28), ...svc("recommendations", 3, 38, 45, 30), ...svc("redis", 2, 25, 50, 25)],
+  },
+  {
+    name: "worker-08", role: "worker", status: "ready",
+    pods: [...svc("auth", 3, 41, 50, 33), ...svc("notifications", 3, 35, 45, 30)],
+  },
+  { name: "worker-09", role: "worker", status: "ready", pods: [...svc("mailer", 3, 22, 30, 20)] },
+  {
+    name: "worker-10", role: "worker", status: "warning",
+    pods: [
+      ...svc("search", 6, 48, 56, 44, [3]), ...svc("catalog", 5, 45, 52, 40),
+      ...svc("orders", 5, 50, 55, 45, [1]), ...svc("cart", 3, 40, 48, 42),
+    ],
+  },
+  {
+    name: "worker-11", role: "worker", status: "warning",
+    pods: [
+      ...svc("catalog", 5, 40, 58, 45, [1]), ...svc("payments", 4, 45, 55, 48),
+      ...svc("cart", 4, 42, 60, 50, [2]), ...svc("redis", 2, 35, 65, 40),
+    ],
+  },
+  {
+    name: "worker-12", role: "worker", status: "ready",
+    pods: [...svc("frontend", 4, 33, 40, 31), ...svc("catalog", 4, 30, 38, 32), ...svc("redis", 3, 25, 50, 28)],
+  },
+  {
+    name: "worker-13", role: "worker", status: "ready",
+    pods: [...svc("api-gateway", 3, 35, 42, 45), ...svc("orders", 3, 38, 46, 40), ...svc("cart", 2, 30, 40, 38)],
+  },
+  {
+    name: "worker-14", role: "worker", status: "ready",
+    pods: [...svc("search", 2, 29, 36, 26), ...svc("recommendations", 3, 32, 42, 28)],
+  },
+  {
+    name: "worker-15", role: "worker", status: "ready",
+    pods: [...svc("auth", 2, 44, 52, 39), ...svc("notifications", 2, 35, 45, 33)],
+  },
+  { name: "worker-16", role: "worker", status: "ready", pods: [...svc("mailer", 2, 20, 28, 22)] },
 ];
 
 export const ORDERED = [...NODES].sort((a, b) => b.pods.length - a.pods.length);
 
 // 이상은 "사용률"이 아니라 별도 신호로 정의 — 사용률이 낮아도 이상일 수 있음.
+// 키 = `${node}/${pod}` — 서비스명이 노드 간 중복되므로 노드로 스코프한다.
 export const ANOMALIES: Record<string, Anomaly> = {
-  "app-b-07": {
+  "gpu-02/vllm-server-07": {
     sev: "crit",
     kind: "errors",
     headline: "HTTP 5xx 급증 (6.8%)",
-    ebpf: ["uprobe: 응답 status≥500 6.8% (정상 0.2%)", "go runtime: panic recover 142건/분", "downstream payments-api 연결 거부 31%"],
-    action: "payments-api 의존성 점검 · 최근 배포 롤백 검토",
+    ebpf: ["uprobe: 응답 status≥500 6.8% (정상 0.2%)", "go runtime: panic recover 142건/분", "downstream feature-store 연결 거부 31%"],
+    action: "feature-store 의존성 점검 · 최근 배포 롤백 검토",
   },
-  "app-c-04": {
+  "worker-03/payments-04": {
     sev: "crit",
     kind: "net",
     headline: "TCP 재전송 폭증 (CPU는 정상)",
     ebpf: ["kprobe tcp_retransmit_skb: 148 retrans/s", "p99 RTT 380ms (baseline 12ms)", "SYN 재시도 22%, RST 수신 증가"],
     action: "노드 NIC/CNI 상태 및 대상 서비스 네트워크 정책 확인",
   },
-  "app-c-11": {
+  "worker-03/api-gateway-03": {
     sev: "warn",
     kind: "net",
     headline: "패킷 드롭 상승",
     ebpf: ["tracepoint skb:kfree_skb 39/s", "conntrack 테이블 사용률 88%"],
     action: "conntrack 한도 및 동시연결 수 확인",
   },
-  "app-k-05": {
+  "worker-11/catalog-05": {
     sev: "crit",
     kind: "mem",
     headline: "메모리 압박 · OOM 임박",
     ebpf: ["RSS 1.94GB / limit 2GB (97%)", "major page fault 1.2k/s", "오프힙 할당 급증, GC pause 210ms"],
     action: "메모리 누수 프로파일 · limit 상향 또는 replica 증설",
   },
-  "app-a-11": {
+  "gpu-01/llm-inference-05": {
     sev: "warn",
     kind: "latency",
     headline: "요청 지연 상승 (p99)",
-    ebpf: ["off-CPU 분석: futex 대기 64%", "runqueue latency 18ms", "DB 커넥션 풀 대기 증가"],
-    action: "락 경합/커넥션 풀 크기 점검",
+    ebpf: ["off-CPU 분석: futex 대기 64%", "runqueue latency 18ms", "KV cache 대기 증가"],
+    action: "락 경합/배치 크기 점검",
   },
-  "app-e-15": {
+  "gpu-03/data-loader-05": {
     sev: "crit",
     kind: "cpu",
     headline: "CPU 스로틀링 심각",
     ebpf: ["cgroup cpu.stat throttled 41%", "runqueue latency 27ms", "핫패스: json.Marshal 38% on-CPU"],
     action: "CPU limit 상향 또는 직렬화 경로 최적화",
   },
-  "app-j-08": {
+  "worker-10/search-05": {
     sev: "warn",
     kind: "cpu",
     headline: "CPU 스로틀 경고",
     ebpf: ["cgroup throttled 16%", "주기적 burst 패턴 관측"],
     action: "limit/quota 여유 확인",
   },
-  "app-b-18": {
+  "gpu-02/reranker-04": {
     sev: "warn",
     kind: "errors",
     headline: "gRPC 에러율 상승",
@@ -157,7 +228,7 @@ export function nodeDownAnomaly(node: ClusterNode): Anomaly {
 
 export function podAnomaly(node: ClusterNode, pod: Pod): Anomaly | null {
   if (pod.cpu < 0) return node.status === "down" ? nodeDownAnomaly(node) : null;
-  return ANOMALIES[pod.name] ?? null;
+  return ANOMALIES[`${node.name}/${pod.name}`] ?? null;
 }
 
 // ── 조회 ─────────────────────────────────────────────────────────────────────
@@ -190,6 +261,30 @@ export function nodeStats(node: ClusterNode) {
     noData: node.pods.length - live.length,
     anomalies,
   };
+}
+
+// ── 클러스터 이슈 피드 — Anomaly Map 트리아지 레일 (Watchdog/Coroot 관례) ──────
+// 맵이 "어디"를 보여주면, 이슈 피드는 "무엇이 왜"를 심각도순으로 나열한다.
+
+export type ClusterIssue = {
+  node: ClusterNode;
+  pod: Pod | null; // null = 노드 레벨 이슈 (NotReady)
+  anomaly: Anomaly;
+};
+
+export function clusterIssues(): ClusterIssue[] {
+  const issues: ClusterIssue[] = [];
+  for (const node of NODES) {
+    if (node.status === "down") issues.push({ node, pod: null, anomaly: nodeDownAnomaly(node) });
+    for (const pod of node.pods) {
+      if (pod.cpu < 0) continue;
+      const anomaly = ANOMALIES[`${node.name}/${pod.name}`];
+      if (anomaly) issues.push({ node, pod, anomaly });
+    }
+  }
+  // crit 먼저, 그중 노드 NotReady(영향 반경 최대)가 최상단
+  const rank = (i: ClusterIssue) => (i.anomaly.sev === "crit" ? 0 : 2) + (i.pod === null ? -1 : 0);
+  return issues.sort((a, b) => rank(a) - rank(b));
 }
 
 // ── 색 / 토큰 ─────────────────────────────────────────────────────────────────
@@ -1082,58 +1177,127 @@ export function nodeGpu(node: ClusterNode): GpuInfo | null {
   };
 }
 
-// ── 노드 레벨 GPU 토폴로지 — 노드 안 GPU들의 NVLink 메시 + PCIe host 경로 ──────────
+// ── 노드 레벨 GPU 패브릭 토폴로지 (DGX/HGX 베이스보드 관점) ──────────────────────
 // 디바이스 레벨 interconnect(CPU·GPU·NIC 단일)와 달리, 노드를 "GPU rack"으로 보고
-// 멀티-GPU 배치를 한눈에. GPU 개수(2/4/8)에 맞춰 그리드로 깔고 인접 GPU는 NVLink,
-// top-row GPU는 CPU로 PCIe host 경로를 연결. 디바이스 레벨이라 항상 관측 가능.
-const NVLINK_MAX_GBS = 50; // per-link 집계 대역폭 상한 (시각화 정규화 기준)
-export function nodeGpuTopology(node: ClusterNode, info: GpuInfo): GpuInterconnect | null {
+// 멀티-GPU 인터커넥트를 하드웨어 패브릭으로 모델링:
+//   · 8-GPU → NVSwitch 패브릭 (all-to-all, HGX 관례)
+//   · 4-GPU → 직접 NVLink 풀메시
+//   · 2-GPU → NVLink 브리지
+// nvidia-smi topo -m 매트릭스(GPU×GPU NV#/PHB/SYS)도 함께 산출. 디바이스 레벨이라 항상 관측.
+const NVLINK_MAX_GBS = 50; // per-pair 집계 NVLink 대역폭 상한 (정규화 기준)
+const NVSWITCH_LANES = 12; // NVSwitch 패브릭 경유 경로의 본딩 링크 수 (NV#)
+
+export type FabricKind = "nvswitch" | "mesh" | "pair";
+export type FabricGpu = {
+  index: number;
+  name: string; // "gpu=0"
+  model: string; // 짧은 모델명
+  util: number; // 0..1
+  tempC: number;
+  memUsedMB: number;
+  memTotalMB: number;
+  pcieGbs: number;
+  pcieMaxGbs: number;
+  nvlinkGbs: number; // 이 GPU의 집계 NVLink throughput
+  nvlinkMaxGbs: number;
+  severity: Severity | "ok"; // verdict severity → 상태 색
+  idle: boolean;
+  throttled: boolean; // 열/전력 스로틀 (idle 제외)
+  numa: number; // 0 | 1 — CPU 소켓 귀속 (매트릭스 PHB/SYS 분류)
+};
+export type FabricLink = { a: number; b: number; gbs: number; maxGbs: number; count: number };
+export type MatrixKind = "self" | "nvlink" | "phb" | "sys";
+export type MatrixCell = { kind: MatrixKind; label: string; ratio: number; gbs: number };
+export type GpuFabric = {
+  kind: FabricKind;
+  gpus: FabricGpu[];
+  links: FabricLink[]; // GPU↔GPU (mesh/pair). nvswitch면 스위치 경유라 빈 배열
+  switchGbs: number; // NVSwitch 패브릭 집계 (kind==="nvswitch"만 유의미)
+  switchMaxGbs: number;
+  host: { gbs: number; maxGbs: number }; // CPU PCIe 집계
+  nic: { gbs: number; maxGbs: number }; // NIC (netobs)
+  matrix: MatrixCell[][]; // N×N (self 포함)
+};
+
+export function gpuFabric(node: ClusterNode, info: GpuInfo): GpuFabric | null {
   if (info.views.length === 0) return null;
   const views = info.views;
   const n = views.length;
-  const cols = n <= 2 ? n : n === 4 ? 2 : 4;
-  const rows = Math.ceil(n / cols);
-  const rowY = rows === 1 ? [70] : [56, 86];
-  const colX = (count: number) =>
-    count === 1 ? [50] : Array.from({ length: count }, (_, i) => 18 + (64 * i) / (count - 1));
+  const kind: FabricKind = n >= 8 ? "nvswitch" : n >= 4 ? "mesh" : "pair";
+  const half = n / 2;
+  const numaOf = (i: number) => (n >= 4 && i >= half ? 1 : 0);
+  const shortModel = (m: string) => m.replace(/^NVIDIA\s+/i, "").replace(/GeForce\s+/i, "").trim();
 
-  const nodes: GpuIcNode[] = [{ id: "cpu", label: "CPU · NUMA0", kind: "cpu", x: 50, y: 14 }];
-  for (let i = 0; i < n; i++) {
-    const r = Math.floor(i / cols);
-    const c = i % cols;
-    const rowCount = Math.min(cols, n - r * cols);
-    nodes.push({ id: `gpu${i}`, label: `GPU ${i}`, kind: "gpu", x: colX(rowCount)[c], y: rowY[r] });
-  }
+  const gpus: FabricGpu[] = views.map((v) => {
+    const d = v.device;
+    return {
+      index: d.index,
+      name: d.name,
+      model: shortModel(d.model),
+      util: d.util,
+      tempC: d.tempC,
+      memUsedMB: d.memUsedMB,
+      memTotalMB: d.memTotalMB,
+      pcieGbs: d.pcieGbs,
+      pcieMaxGbs: d.pcieMaxGbs,
+      nvlinkGbs: 0, // 아래에서 매트릭스 합으로 채움
+      nvlinkMaxGbs: NVLINK_MAX_GBS,
+      severity: v.verdict.severity,
+      idle: v.idle,
+      throttled: d.throttleReasons.some((r) => r !== "none" && r !== "gpu_idle"),
+      numa: numaOf(d.index),
+    };
+  });
 
-  const links: GpuIcLink[] = [];
-  // PCIe host 경로 — top-row GPU만 (PCIe root). util 높을수록 host 전송 점유 증가.
-  for (let i = 0; i < n; i++) {
-    if (Math.floor(i / cols) !== 0) continue;
-    const d = views[i].device;
-    links.push({
-      from: "cpu", to: `gpu${i}`, kind: "pcie",
-      gbs: d.pcieGbs, maxGbs: d.pcieMaxGbs, label: "PCIe 4.0 x16",
-    });
-  }
-  // NVLink — 행 내 수평 인접쌍 + 행 간 수직 인접쌍. 양쪽 GPU가 함께 바쁠수록 트래픽↑.
-  const nvBw = (a: number, b: number) => {
+  // per-pair NVLink 대역폭 — 양쪽이 함께 바쁠수록 트래픽↑ (min util), 결정적 지터.
+  const pairGbs = (a: number, b: number) => {
     const u = Math.min(views[a].device.util, views[b].device.util);
     return r2(clamp(2 + u * 44 + (strHash(node.name + "nvl" + a + "_" + b) % 60) / 10, 0, NVLINK_MAX_GBS));
   };
-  for (let r = 0; r < rows; r++) {
-    const rowCount = Math.min(cols, n - r * cols);
-    for (let c = 0; c < rowCount - 1; c++) {
-      const a = r * cols + c, b = r * cols + c + 1;
-      links.push({ from: `gpu${a}`, to: `gpu${b}`, kind: "nvlink", gbs: nvBw(a, b), maxGbs: NVLINK_MAX_GBS, label: "NVLink" });
-    }
+  const pairCount = (a: number, b: number) =>
+    kind === "nvswitch" ? NVSWITCH_LANES : kind === "pair" ? 4 : 1 + (strHash(node.name + "nvc" + a + "_" + b) % 4);
+
+  // GPU↔GPU 직접 링크 (mesh/pair만 다이어그램에 그림; nvswitch는 스위치 경유)
+  const links: FabricLink[] = [];
+  if (kind !== "nvswitch") {
+    for (let a = 0; a < n; a++)
+      for (let b = a + 1; b < n; b++)
+        links.push({ a, b, gbs: pairGbs(a, b), maxGbs: NVLINK_MAX_GBS, count: pairCount(a, b) });
   }
-  if (rows === 2) {
-    for (let c = 0; c < cols; c++) {
-      const a = c, b = cols + c;
-      if (b < n) links.push({ from: `gpu${a}`, to: `gpu${b}`, kind: "nvlink", gbs: nvBw(a, b), maxGbs: NVLINK_MAX_GBS, label: "NVLink" });
+
+  // 매트릭스 (topo -m) — 모든 구성에서 GPU쌍은 NVLink 연결(패브릭/메시/브리지).
+  const matrix: MatrixCell[][] = [];
+  for (let a = 0; a < n; a++) {
+    const row: MatrixCell[] = [];
+    for (let b = 0; b < n; b++) {
+      if (a === b) {
+        row.push({ kind: "self", label: "X", ratio: -1, gbs: 0 });
+      } else {
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const gbs = pairGbs(lo, hi);
+        row.push({ kind: "nvlink", label: `NV${pairCount(lo, hi)}`, ratio: clamp(gbs / NVLINK_MAX_GBS, 0, 1), gbs });
+      }
     }
+    matrix.push(row);
   }
-  return { nodes, links };
+
+  // 각 GPU의 집계 NVLink throughput — 매트릭스 행 합 (자기 제외)
+  gpus.forEach((g, i) => {
+    const peers = matrix[i].filter((c) => c.kind === "nvlink");
+    g.nvlinkGbs = r2(peers.reduce((s, c) => s + c.gbs, 0));
+    g.nvlinkMaxGbs = r2(NVLINK_MAX_GBS * peers.length);
+  });
+
+  // NVSwitch 패브릭 집계 (양방향 중복 제거)
+  const switchGbs = r2(gpus.reduce((s, g) => s + g.nvlinkGbs, 0) / 2);
+  const switchMaxGbs = r2((NVLINK_MAX_GBS * n * (n - 1)) / 2);
+
+  // 호스트 PCIe 집계 + NIC (디바이스 레벨 interconnect에서 NIC 링크 재사용)
+  const host = { gbs: r2(views.reduce((s, v) => s + v.device.pcieGbs, 0)), maxGbs: r2(PCIE_X16_MAX_GBS * n) };
+  const nicLink = views[0].interconnect.links.find((l) => l.to === "nic");
+  const nic = { gbs: nicLink?.gbs ?? 0, maxGbs: nicLink?.maxGbs ?? NIC_X8_MAX_GBS };
+
+  return { kind, gpus, links, switchGbs, switchMaxGbs, host, nic, matrix };
 }
 
 // ── GPU 진단 (verdict) — "GPU가 왜 안 되는가"를 실패 모드로 분류 ─────────────────
@@ -1461,6 +1625,125 @@ export function nodeNoisyNeighbors(node: ClusterNode): NoisyNeighbor[] {
   return ranked;
 }
 
+// ── 노드 서비스 토폴로지 (netobs) — 노드의 파드/서비스 관계 그래프 ────────────────
+// eBPF 관례(Cilium Hubble/Kiali)의 "topology" = 서비스 관계 그래프. 이 노드엔 워크로드
+// 하나의 파드 레플리카들이 올라가므로, 파드를 그래프 노드로, noisy-neighbor(suspect→victim)를
+// 방향성 간섭 엣지로 그린다. 크기=트래픽(net), 색=상태, 엣지 색=victim_signal.
+export type SvcSeverity = Severity | "ok" | "nodata";
+export type SvcNode = {
+  service: string; // 서비스명 (namespace)
+  pods: number; // 총 파드
+  live: number; // 살아있는 파드
+  x: number; y: number; // 링 좌표 (0..100)
+  labelX: number; labelY: number; // 라벨 좌표 (링 바깥)
+  anchor: "start" | "middle" | "end";
+  traffic: number; // 평균 net 0..100 (노드 크기)
+  severity: SvcSeverity; // 서비스 내 최악
+  repPod: string; // 대표 파드 (클릭 드릴다운) — 최악 severity, 동률이면 최고 트래픽
+  degree: number; // 연결된 간섭 엣지 수
+};
+export type SvcEdge = {
+  from: string; to: string; // suspect_service → victim_service
+  fromIdx: number; toIdx: number;
+  signal: NoisySignal; // dominant victim_signal
+  score: number; // max score
+  count: number; // 하부 pod-pair 수
+  self: boolean; // 서비스 내부 간섭 (레플리카 간)
+  strong: boolean; // 이상 간섭 — 강조·애니메이션
+};
+export type ServiceTopo = {
+  node: string;
+  nodes: SvcNode[];
+  edges: SvcEdge[];
+  serviceCount: number;
+  liveCount: number;
+  linkCount: number;
+  topSuspect: { service: string; count: number } | null; // 가장 많은 서비스를 간섭한 서비스
+};
+
+const SVC_SEV_RANK = (s: SvcSeverity) => (s === "crit" ? 3 : s === "warn" ? 2 : s === "ok" ? 1 : 0);
+
+export function nodeServiceTopology(node: ClusterNode): ServiceTopo | null {
+  const pods = node.pods;
+  if (pods.length === 0) return null;
+  const live = pods.filter((p) => p.cpu >= 0);
+  if (live.length === 0) return null; // 전부 nodata(노드 down) → 그래프 없음
+
+  // 파드 → 서비스 그룹 (등장 순서 유지)
+  const order: string[] = [];
+  const groups = new Map<string, Pod[]>();
+  for (const p of pods) {
+    const s = noisyNs(p.name);
+    if (!groups.has(s)) { groups.set(s, []); order.push(s); }
+    groups.get(s)!.push(p);
+  }
+
+  const N = order.length;
+  const R = N === 1 ? 0 : 34, cx = 50, cy = 50;
+  const idxOf = new Map<string, number>();
+  const nodes: SvcNode[] = order.map((service, i) => {
+    const gp = groups.get(service)!;
+    const livePods = gp.filter((p) => p.cpu >= 0);
+    const ang = (-90 + (360 * i) / N) * (Math.PI / 180);
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const anchor: "start" | "middle" | "end" = N === 1 || Math.abs(cos) < 0.3 ? "middle" : cos > 0 ? "start" : "end";
+    // 서비스 내 최악 severity + 대표 파드 (최악 우선, 동률이면 최고 net)
+    let severity: SvcSeverity = livePods.length ? "ok" : "nodata";
+    let rep = gp[0], repRank = -1;
+    for (const p of gp) {
+      const s: SvcSeverity = p.cpu < 0 ? "nodata" : (podAnomaly(node, p)?.sev ?? "ok");
+      if (SVC_SEV_RANK(s) > SVC_SEV_RANK(severity)) severity = s;
+      const rk = SVC_SEV_RANK(s) * 1000 + (p.net < 0 ? 0 : p.net);
+      if (rk > repRank) { repRank = rk; rep = p; }
+    }
+    const traffic = livePods.length ? Math.round(livePods.reduce((s, p) => s + p.net, 0) / livePods.length) : 0;
+    idxOf.set(service, i);
+    return {
+      service, pods: gp.length, live: livePods.length,
+      x: r2(cx + R * cos), y: r2(cy + R * sin),
+      labelX: r2(cx + (R + 8) * cos), labelY: r2(cy + (R + 8) * sin),
+      anchor, traffic, severity, repPod: rep.name, degree: 0,
+    };
+  });
+
+  // 서비스↔서비스 간섭 엣지 — pod-pair(noisy-neighbor)를 서비스쌍으로 집계
+  const noisy = nodeNoisyNeighbors(node);
+  const maxScore = noisy.reduce((m, r) => Math.max(m, r.score), 0) || 1;
+  const agg = new Map<string, SvcEdge>();
+  const suspectCount = new Map<string, number>();
+  for (const r of noisy) {
+    const fromSvc = noisyNs(r.suspect), toSvc = noisyNs(r.victim);
+    const fi = idxOf.get(fromSvc), ti = idxOf.get(toSvc);
+    if (fi == null || ti == null) continue;
+    const key = `${fromSvc}->${toSvc}`;
+    const cur = agg.get(key);
+    if (cur) {
+      cur.count++;
+      if (r.score > cur.score) { cur.score = r.score; cur.signal = r.signal; }
+    } else {
+      agg.set(key, { from: fromSvc, to: toSvc, fromIdx: fi, toIdx: ti, signal: r.signal, score: r.score, count: 1, self: fromSvc === toSvc, strong: false });
+    }
+    suspectCount.set(fromSvc, (suspectCount.get(fromSvc) ?? 0) + 1);
+  }
+  const edges = [...agg.values()];
+  for (const e of edges) {
+    e.strong = e.score >= 0.82 * maxScore;
+    nodes[e.fromIdx].degree++;
+    if (!e.self) nodes[e.toIdx].degree++;
+  }
+
+  const top = [...suspectCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  return {
+    node: node.name,
+    nodes,
+    edges,
+    serviceCount: N,
+    liveCount: live.length,
+    linkCount: edges.length,
+    topSuspect: top ? { service: top[0], count: top[1] } : null,
+  };
+}
+
 export const ALERT_NAME: Record<AnomalyKind, string> = {
   cpu: "CPUThrottlingHigh",
   mem: "MemoryPressureHigh",
@@ -1492,7 +1775,7 @@ export function nodeAlerts(node: ClusterNode): NodeAlert[] {
   }
   const out: NodeAlert[] = [];
   for (const p of node.pods) {
-    const a = ANOMALIES[p.name];
+    const a = ANOMALIES[`${node.name}/${p.name}`];
     if (a) out.push({ name: ALERT_NAME[a.kind], severity: a.sev, component: ALERT_COMP[a.kind], pod: p.name, kind: a.kind });
   }
   return out.sort((x, y) => (x.severity === y.severity ? 0 : x.severity === "crit" ? -1 : 1));
@@ -1505,7 +1788,7 @@ export function podAlertList(node: ClusterNode, pod: Pod): NodeAlert[] {
       ? [{ name: ALERT_NAME.node, severity: "crit", component: ALERT_COMP.node, pod: pod.name, kind: "node" }]
       : [];
   }
-  const a = ANOMALIES[pod.name];
+  const a = ANOMALIES[`${node.name}/${pod.name}`];
   return a ? [{ name: ALERT_NAME[a.kind], severity: a.sev, component: ALERT_COMP[a.kind], pod: pod.name, kind: a.kind }] : [];
 }
 
@@ -1657,8 +1940,8 @@ export function nodeDiagnosis(node: ClusterNode): Diagnosis {
   const worstDim = dimList.sort((a, b) => a.v - b.v)[0];
 
   // 파드 알림 개수 — severity 에는 영향을 주지 않는 "어디를 볼지" 포인터로만 사용
-  const podCrit = node.pods.filter((p) => ANOMALIES[p.name]?.sev === "crit").length;
-  const podWarn = node.pods.filter((p) => ANOMALIES[p.name]?.sev === "warn").length;
+  const podCrit = node.pods.filter((p) => ANOMALIES[`${node.name}/${p.name}`]?.sev === "crit").length;
+  const podWarn = node.pods.filter((p) => ANOMALIES[`${node.name}/${p.name}`]?.sev === "warn").length;
   const podNote =
     podCrit + podWarn > 0
       ? ` 이 노드의 파드 알림 ${podCrit + podWarn}건(심각 ${podCrit}·경고 ${podWarn})은 파드 단위 문제이며, 알림 탭·파드맵에서 확인하세요.`
