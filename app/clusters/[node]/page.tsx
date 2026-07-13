@@ -47,7 +47,11 @@ import { AppShell, EntityHeader, SectionTitle } from "../../lib/shell";
 import { type TabDef, Tabs } from "../../lib/tabs";
 import { Card, LegendHex } from "../../lib/ui";
 
-export default async function NodePage({ params }: { params: Promise<{ node: string }> }) {
+export default async function NodePage({
+  params,
+}: {
+  params: Promise<{ node: string }>;
+}) {
   const { node: nodeName } = await params;
   const node = getNode(decodeURIComponent(nodeName));
   if (!node) notFound();
@@ -74,10 +78,15 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         note: cpuAn?.ebpf.join(" · "),
       };
     });
-  const dropAgg = ["drop policy", "drop queue", "drop unknown", "retrans"].map((cat) => ({
-    label: cat,
-    value: analytics.reduce((s, x) => s + (x.a.drops.find((d) => d.category === cat)?.rate ?? 0), 0),
-  }));
+  const dropAgg = ["drop policy", "drop queue", "drop unknown", "retrans"].map(
+    (cat) => ({
+      label: cat,
+      value: analytics.reduce(
+        (s, x) => s + (x.a.drops.find((d) => d.category === cat)?.rate ?? 0),
+        0,
+      ),
+    }),
+  );
 
   const podHref = (podName: string) => `/clusters/${node.name}/${podName}`;
   const dim = diagnosis.dimension;
@@ -87,31 +96,91 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
   // ── 노드 vitals (실시간 사용률) — 모든 노드 공통. Grafana Node Exporter 관례:
   //    포화도(%)는 임계 색 게이지, 용량·카운트는 stat 타일. GPU 노드는 GPU util/mem
   //    게이지를, 비-GPU 노드는 Pods/Live stat 타일을 덧붙인다.
-  const cpuPct = live.length ? Math.round(live.reduce((s, p) => s + p.cpu, 0) / live.length) : 0;
-  const memPct = live.length ? Math.round(live.reduce((s, p) => s + p.mem, 0) / live.length) : 0;
+  const cpuPct = live.length
+    ? Math.round(live.reduce((s, p) => s + p.cpu, 0) / live.length)
+    : 0;
+  const memPct = live.length
+    ? Math.round(live.reduce((s, p) => s + p.mem, 0) / live.length)
+    : 0;
   const gpuUsagePct =
-    gpu && gpu.views.length ? Math.round((gpu.views.reduce((s, v) => s + v.device.util, 0) / gpu.views.length) * 100) : 0;
-  const gpuMemUsedGB = gpu ? gpu.views.reduce((s, v) => s + v.device.memUsedMB, 0) / 1024 : 0;
-  const gpuMemTotalGB = gpu ? gpu.views.reduce((s, v) => s + v.device.memTotalMB, 0) / 1024 : 0;
-  const gpuMemPct = gpuMemTotalGB > 0 ? Math.round((gpuMemUsedGB / gpuMemTotalGB) * 100) : 0;
+    gpu && gpu.views.length
+      ? Math.round(
+          (gpu.views.reduce((s, v) => s + v.device.util, 0) /
+            gpu.views.length) *
+            100,
+        )
+      : 0;
+  const gpuMemUsedGB = gpu
+    ? gpu.views.reduce((s, v) => s + v.device.memUsedMB, 0) / 1024
+    : 0;
+  const gpuMemTotalGB = gpu
+    ? gpu.views.reduce((s, v) => s + v.device.memTotalMB, 0) / 1024
+    : 0;
+  const gpuMemPct =
+    gpuMemTotalGB > 0 ? Math.round((gpuMemUsedGB / gpuMemTotalGB) * 100) : 0;
   const vitalTiles: VitalTile[] = [
     { kind: "gauge", label: "CPU", pct: cpuPct, sub: "live 파드 평균" },
     { kind: "gauge", label: "Memory", pct: memPct, sub: "live 파드 평균" },
     ...(gpu
       ? ([
-          { kind: "gauge", label: "GPU 사용률", pct: gpuUsagePct, sub: `SM util · ${gpu.views.length} GPU 평균` },
-          { kind: "gauge", label: "GPU 메모리", pct: gpuMemPct, sub: `${gpuMemUsedGB.toFixed(0)} / ${gpuMemTotalGB.toFixed(0)} GB` },
+          {
+            kind: "gauge",
+            label: "GPU 사용률",
+            pct: gpuUsagePct,
+            sub: `SM util · ${gpu.views.length} GPU 평균`,
+          },
+          {
+            kind: "gauge",
+            label: "GPU 메모리",
+            pct: gpuMemPct,
+            sub: `${gpuMemUsedGB.toFixed(0)} / ${gpuMemTotalGB.toFixed(0)} GB`,
+          },
         ] as VitalTile[])
       : ([
-          { kind: "stat", label: "Pods", value: `${node.pods.length}`, sub: "전체" },
-          { kind: "stat", label: "Live", value: `${live.length}`, sub: "텔레메트리 수신" },
+          {
+            kind: "stat",
+            label: "Pods",
+            value: `${node.pods.length}`,
+            sub: "전체",
+          },
+          {
+            kind: "stat",
+            label: "Live",
+            value: `${live.length}`,
+            sub: "텔레메트리 수신",
+          },
         ] as VitalTile[])),
   ];
   // 실시간 스트리밍 시계열(노드) — 평균 CPU/Mem(+GPU) 사용률을 우→좌로 흘려보낸다.
   const liveSeries = [
-    { key: "cpu", label: "CPU", color: "#6366f1", base: cpuPct, unit: "%", vol: 5 },
-    { key: "mem", label: "Memory", color: "#0ea5e9", base: memPct, unit: "%", vol: 4 },
-    ...(gpu ? [{ key: "gpu", label: "GPU", color: "#8b5cf6", base: gpuUsagePct, unit: "%", vol: 6 }] : []),
+    {
+      key: "cpu",
+      label: "CPU",
+      color: "#6366f1",
+      base: cpuPct,
+      unit: "%",
+      vol: 5,
+    },
+    {
+      key: "mem",
+      label: "Memory",
+      color: "#0ea5e9",
+      base: memPct,
+      unit: "%",
+      vol: 4,
+    },
+    ...(gpu
+      ? [
+          {
+            key: "gpu",
+            label: "GPU",
+            color: "#8b5cf6",
+            base: gpuUsagePct,
+            unit: "%",
+            vol: 6,
+          },
+        ]
+      : []),
   ];
 
   // 네트워크 (송/수신 경로 · ip_version flow · 워크로드별 재전송 · drop reason)
@@ -137,17 +206,37 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         <div className="grid gap-5 sm:grid-cols-2">
           <div>
             <div className="mb-2 flex items-baseline justify-between">
-              <h3 className="text-sm font-bold text-slate-700">Send path p99</h3>
-              <span className="text-[11px] text-slate-500">병목 <span className="font-mono font-semibold text-rose-600">{stageLat.txBottleneck}</span></span>
+              <h3 className="text-sm font-bold text-slate-700">
+                Send path p99
+              </h3>
+              <span className="text-[11px] text-slate-500">
+                병목{" "}
+                <span className="font-mono font-semibold text-rose-600">
+                  {stageLat.txBottleneck}
+                </span>
+              </span>
             </div>
-            <StageLatency stages={stageLat.tx} bottleneck={stageLat.txBottleneck} />
+            <StageLatency
+              stages={stageLat.tx}
+              bottleneck={stageLat.txBottleneck}
+            />
           </div>
           <div>
             <div className="mb-2 flex items-baseline justify-between">
-              <h3 className="text-sm font-bold text-slate-700">Receive path p99</h3>
-              <span className="text-[11px] text-slate-500">병목 <span className="font-mono font-semibold text-rose-600">{stageLat.rxBottleneck}</span></span>
+              <h3 className="text-sm font-bold text-slate-700">
+                Receive path p99
+              </h3>
+              <span className="text-[11px] text-slate-500">
+                병목{" "}
+                <span className="font-mono font-semibold text-rose-600">
+                  {stageLat.rxBottleneck}
+                </span>
+              </span>
             </div>
-            <StageLatency stages={stageLat.rx} bottleneck={stageLat.rxBottleneck} />
+            <StageLatency
+              stages={stageLat.rx}
+              bottleneck={stageLat.rxBottleneck}
+            />
           </div>
         </div>
       </Card>
@@ -158,9 +247,17 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         <NetFlowPanel flow={netFlow} />
       </Card>
       <Card title="TCP retransmission rate by workload (events/s)">
-        <ScoreBars items={retransRows.map((r) => ({ label: r.workload, value: r.rate }))} kind="rate" unit="/s" href={(label) => podHref(label.split("/")[1] ?? label)} />
+        <ScoreBars
+          items={retransRows.map((r) => ({ label: r.workload, value: r.rate }))}
+          kind="rate"
+          unit="/s"
+          href={(label) => podHref(label.split("/")[1] ?? label)}
+        />
       </Card>
-      <Card className="lg:col-span-2" title="Top drop reasons by workload (5m rate)">
+      <Card
+        className="lg:col-span-2"
+        title="Top drop reasons by workload (5m rate)"
+      >
         <DropReasonsTable rows={dropRows} />
       </Card>
     </div>
@@ -174,11 +271,14 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
   const topologyTab: TabDef | null = serviceTopo
     ? {
         id: "topology",
-        label: "Topology",
+        label: "Services",
         badge: serviceTopo.linkCount || undefined,
         content: (
           <div className="space-y-4">
-            <Card title="서비스 토폴로지 (netobs)" hint="이 노드의 서비스 관계 맵 (레플리카 집계) — 노드=서비스, 크기=파드수·트래픽, 색=상태, 화살표=noisy-neighbor 간섭. 클릭 → 대표 파드.">
+            <Card
+              title="서비스 토폴로지 (netobs)"
+              hint="이 노드의 서비스 관계 맵 (레플리카 집계) — 노드=서비스, 크기=파드수·트래픽, 색=상태, 화살표=noisy-neighbor 간섭. 클릭 → 대표 파드."
+            >
               <ServiceTopology topo={serviceTopo} node={node.name} />
             </Card>
             {noisy.length > 0 ? (
@@ -202,9 +302,16 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
         badge: gpu.views.length || undefined,
         alert: dim === "gpu",
         content: (
-          <Card title="GPU 디바이스 (gpuobs)" hint="Grid=디바이스 헬스 · Fabric=인터커넥트 · Matrix=topo -m. 클릭 → GPU Detail">
+          <Card
+            title="GPU 디바이스 (gpuobs)"
+            hint="Grid=디바이스 헬스 · Fabric=인터커넥트 · Matrix=topo -m. 클릭 → GPU Detail"
+          >
             {fabric ? (
-              <GpuViews grid={<GpuCardGrid views={gpu.views} node={node.name} />} fabric={fabric} node={node.name} />
+              <GpuViews
+                grid={<GpuCardGrid views={gpu.views} node={node.name} />}
+                fabric={fabric}
+                node={node.name}
+              />
             ) : (
               <GpuCardGrid views={gpu.views} node={node.name} />
             )}
@@ -226,10 +333,16 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
               </div>
               <PodHoneycomb node={node} />
             </Card>
-            <Card title="파드 자원 (Pod별)" hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세.">
+            <Card
+              title="파드 자원 (Pod별)"
+              hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세."
+            >
               <PodResourceTable node={node} href={podHref} />
             </Card>
-            <Card title="GPU별 사용 파드" hint="이 노드의 GPU들에 어떤 파드가 올라가 있나 — 디바이스별 귀속">
+            <Card
+              title="GPU별 사용 파드"
+              hint="이 노드의 GPU들에 어떤 파드가 올라가 있나 — 디바이스별 귀속"
+            >
               <GpuPodsByDevice gpu={gpu} node={node.name} />
             </Card>
           </div>
@@ -252,10 +365,16 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
                 <AlertList node={node.name} alerts={alerts} />
               </Card>
             ) : null}
-            <Card title="GPU 이벤트 (디바이스 롤업)" hint="XID·ECC·throttle 등 DCGM/NVML 디바이스 이벤트를 시간순으로">
+            <Card
+              title="GPU 이벤트 (디바이스 롤업)"
+              hint="XID·ECC·throttle 등 DCGM/NVML 디바이스 이벤트를 시간순으로"
+            >
               <NodeGpuEventsTimeline views={gpu.views} />
             </Card>
-            <Card title="gpuobs-agent self-health" hint="관측 신뢰도 — GPU 진단의 전제">
+            <Card
+              title="gpuobs-agent self-health"
+              hint="관측 신뢰도 — GPU 진단의 전제"
+            >
               <GpuAgentPanel agent={gpu.agent} />
             </Card>
             <Card title="netobs-agent self-health">
@@ -290,7 +409,10 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
               </div>
               <PodHoneycomb node={node} />
             </Card>
-            <Card title="파드 자원 (Pod별)" hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세.">
+            <Card
+              title="파드 자원 (Pod별)"
+              hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세."
+            >
               <PodResourceTable node={node} href={podHref} />
             </Card>
           </div>
@@ -343,11 +465,21 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
       tabs.splice(at + 1, 0, topologyTab);
     }
 
-    initialTab = dim === "cpu" || dim === "net" ? dim : node.status === "down" ? "alerts" : "pods";
+    initialTab =
+      dim === "cpu" || dim === "net"
+        ? dim
+        : node.status === "down"
+          ? "alerts"
+          : "pods";
   }
 
   return (
-    <AppShell crumbs={[{ label: "Anomaly Map", href: "/" }, { label: node.name, dot: tone.dot }]}>
+    <AppShell
+      crumbs={[
+        { label: "Anomaly Map", href: "/" },
+        { label: node.name, dot: tone.dot },
+      ]}
+    >
       <div className="space-y-6">
         <EntityHeader
           kind={gpu ? "GPU 노드" : "노드"}
@@ -356,9 +488,13 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
           statusLabel={tone.label}
           pills={
             <>
-              <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">{node.role}</span>
+              <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                {node.role}
+              </span>
               {gpu ? (
-                <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">GPU ×{gpu.views.length}</span>
+                <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                  GPU ×{gpu.views.length}
+                </span>
               ) : null}
             </>
           }
@@ -383,7 +519,13 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
             <DiagnosisCard node={node.name} dx={diagnosis} />
           </div>
           <section className="lg:col-span-1">
-            <SectionTitle right={<span className="text-[11px] text-slate-500">live · 15m</span>}>Vitals</SectionTitle>
+            <SectionTitle
+              right={
+                <span className="text-[11px] text-slate-500">live · 15m</span>
+              }
+            >
+              Vitals
+            </SectionTitle>
             <div className="grid grid-cols-2 gap-3">
               <LiveVitals tiles={vitalTiles} />
             </div>
@@ -392,7 +534,13 @@ export default async function NodePage({ params }: { params: Promise<{ node: str
 
         {/* ── 실시간 사용률 — 스트리밍 시계열(노드 페이지엔 없던 차트) ── */}
         <section>
-          <SectionTitle right={<span className="text-[11px] text-slate-500">streaming · 1s</span>}>실시간 사용률</SectionTitle>
+          <SectionTitle
+            right={
+              <span className="text-[11px] text-slate-500">streaming · 1s</span>
+            }
+          >
+            실시간 사용률
+          </SectionTitle>
           <Card>
             <LiveArea series={liveSeries} max={100} caption="live · 1s" />
           </Card>

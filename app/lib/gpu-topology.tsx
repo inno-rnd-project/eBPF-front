@@ -141,7 +141,7 @@ function GpuTile({
       href={`/clusters/${node}/gpu/${g.index}`}
       onMouseEnter={() => onHover(g.index)}
       onMouseLeave={() => onHover(null)}
-      className={`surface-card anim-rise group absolute z-10 block w-36 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl ${ring} transition-[scale,box-shadow,opacity] duration-200 hover:z-20 hover:scale-[1.04] hover:shadow-lg`}
+      className={`anim-rise group absolute z-10 block w-36 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border border-slate-200 bg-white ${ring} transition-[scale,opacity] duration-200 hover:z-20 hover:scale-[1.04]`}
       style={{ left: `${pt.x}%`, top: `${pt.y}%`, opacity: state === "dim" ? 0.32 : 1, animationDelay: `${Math.min(idx, 12) * 55}ms` }}
     >
       {/* 상태 강조 스트립 */}

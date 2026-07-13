@@ -1312,8 +1312,8 @@ export function GpuDashboard({ gpu, node, verdict }: { gpu: GpuInfo; node: strin
   return <GpuDeviceList views={gpu.views} node={node} />;
 }
 
-// ── GPU 카드 그리드 + 히트맵 (노드 "GPUs" 탭의 메인 화면) ────────────────────────
-// 노드를 GPU rack 으로 보고 디바이스를 카드로 한눈에 비교. 카드/히트맵 클릭 → GPU Detail.
+// ── GPU 카드 그리드 (노드 "GPUs" 탭의 메인 화면) ────────────────────────────────
+// 노드를 GPU rack 으로 보고 디바이스를 카드로 한눈에 비교. 카드 클릭 → GPU Detail.
 // util 은 "낮을수록 이상"(idle) — 막대 색은 활용도, 상태 점/라벨은 verdict(throttle/idle 포함).
 function gpuUtilColor(util: number) {
   return util < 0.2 ? "#dc4a3d" : util < 0.4 ? "#e8923b" : "#5bb85b";
@@ -1329,7 +1329,7 @@ function GpuCard({ view, node, idx = 0 }: { view: GpuDeviceView; node: string; i
   return (
     <Link
       href={`/clusters/${node}/gpu/${d.index}`}
-      className={`surface-card anim-rise group block rounded-xl border ${ring} p-3 transition-colors hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50/30 hover:shadow-md`}
+      className={`anim-rise group block rounded-xl border ${ring} bg-white p-3 transition-colors hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50/30`}
       style={{ animationDelay: `${Math.min(idx, 12) * 50}ms` }}
     >
       <div className="flex items-center justify-between">
@@ -1366,35 +1366,12 @@ export function GpuCardGrid({ views, node }: { views: GpuDeviceView[]; node: str
   if (!views.length) return <p className="text-[12px] text-slate-500">GPU 디바이스 없음 — agent down 으로 디바이스 텔레메트리 수집 불가</p>;
   return (
     <div className="space-y-4">
-      {/* 히트맵 스트립 — 디바이스 상태(verdict)를 한 줄로 비교 */}
-      <div>
-        <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-500">GPU heatmap · 상태 비교</p>
-        <div className="flex flex-wrap gap-1.5">
-          {views.map((v, i) => {
-            const pct = Math.round(v.device.util * 100);
-            return (
-              <Link
-                key={v.device.name}
-                href={`/clusters/${node}/gpu/${v.device.index}`}
-                title={`GPU ${v.device.index} · ${v.verdict.modeLabel} · SM ${pct}%`}
-                className="anim-rise flex h-10 w-10 flex-col items-center justify-center rounded-md font-mono text-white transition-transform hover:scale-110"
-                style={{ backgroundColor: GPU_SEV_DOT[v.verdict.severity], animationDelay: `${Math.min(i, 16) * 30}ms` }}
-              >
-                <span className="text-[11px] font-bold leading-none">{v.device.index}</span>
-                <span className="text-[8px] leading-none opacity-90">{pct}%</span>
-              </Link>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 카드 그리드 */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {views.map((v, i) => (
           <GpuCard key={v.device.name} view={v} node={node} idx={i} />
         ))}
       </div>
-      <p className="text-[10px] text-slate-500">카드/히트맵 클릭 → GPU Detail (eBPF 심층 분석: CUDA·Kernel·Memory·Bandwidth).</p>
+      <p className="text-[10px] text-slate-500">카드 클릭 → GPU Detail (eBPF 심층 분석: CUDA·Kernel·Memory·Bandwidth).</p>
     </div>
   );
 }

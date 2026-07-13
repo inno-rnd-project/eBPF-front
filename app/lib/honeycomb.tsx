@@ -54,14 +54,10 @@ type HoverState = { pod: Pod; anomaly: Anomaly | null; x: number; y: number };
 export function PodHoneycomb({
   node,
   fill = "anomaly",
-  onSelectPod,
-  selectedPod,
   matcher,
 }: {
   node: ClusterNode;
   fill?: FillKey;
-  onSelectPod?: (pod: Pod) => void; // 지정 시 클릭이 페이지 이동 대신 선택 콜백 (맵의 사이드 패널)
-  selectedPod?: string | null; // 선택된 파드 — 인디고 링으로 강조
   matcher?: (pod: Pod) => boolean; // 검색 필터 — 불일치 파드는 디밍
 }) {
   const router = useRouter();
@@ -90,14 +86,13 @@ export function PodHoneycomb({
           const cell = comb.cells[i];
           const a = fill === "anomaly" ? podAnomaly(node, pod) : null;
           const dimmed = matcher ? !matcher(pod) : false;
-          const selected = selectedPod === pod.name;
           return (
             <polygon
               key={pod.name}
               points={hexPath(cell.cx, cell.cy, HEX_R)}
               fill={fillOf(pod)}
-              stroke={selected ? "#4f46e5" : a ? SEV_TONE[a.sev].stroke : "#ffffff"}
-              strokeWidth={selected ? 2.6 : a ? 1.6 : 1.2}
+              stroke={a ? SEV_TONE[a.sev].stroke : "#ffffff"}
+              strokeWidth={a ? 1.6 : 1.2}
               opacity={dimmed ? 0.15 : 1}
               className={`cursor-pointer transition-[fill,opacity] duration-200 hover:opacity-70 ${
                 a?.sev === "crit" && !dimmed ? "animate-pulse" : ""
@@ -107,9 +102,7 @@ export function PodHoneycomb({
                 setHover({ pod, anomaly: podAnomaly(node, pod), x: e.clientX, y: e.clientY })
               }
               onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))}
-              onClick={() =>
-                onSelectPod ? onSelectPod(pod) : router.push(`/clusters/${node.name}/${pod.name}`)
-              }
+              onClick={() => router.push(`/clusters/${node.name}/${pod.name}`)}
             />
           );
         })}
@@ -120,6 +113,13 @@ export function PodHoneycomb({
 }
 
 // ── hover 카드 — 커서를 따라다니는 간략 정보 ──────────────────────────────────
+// 지표 값 텍스트는 평상시 잉크 유지, RAMP 임계(75 주황/90 적색) 구간에서만 심각도 톤
+function statTone(v: number) {
+  if (v >= 90) return SEV_TONE.crit.text;
+  if (v >= 75) return SEV_TONE.warn.text;
+  return undefined;
+}
+
 function PodTooltip({ pod, anomaly, x, y }: HoverState) {
   const noData = pod.cpu < 0;
   const namespace = pod.name.replace(/-\d+$/, "");
@@ -167,7 +167,16 @@ function PodTooltip({ pod, anomaly, x, y }: HoverState) {
           ).map(([label, v]) => (
             <div key={label} className="rounded bg-slate-50 px-1 py-1">
               <div className="text-[9px] font-medium text-slate-500">{label}</div>
-              <div className="text-[12px] font-semibold tabular-nums">{v}%</div>
+              <div className="text-[12px] font-semibold tabular-nums" style={{ color: statTone(v) }}>
+                {v}%
+              </div>
+              {/* 미니 램프 바 — 색맹/인쇄에서도 길이로 판독 가능한 보조 인코딩 */}
+              <div className="mx-auto mt-1 h-0.75 w-full overflow-hidden rounded-full bg-slate-200/80">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${clamp(v, 0, 100)}%`, backgroundColor: rampColor(v) }}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -180,10 +189,6 @@ function PodTooltip({ pod, anomaly, x, y }: HoverState) {
         >
           ⚠ {anomaly.headline}
         </div>
-      ) : null}
-
-      {!noData ? (
-        <p className="mt-2 text-[10px] text-slate-500">클릭해서 자세히 보기 →</p>
       ) : null}
     </div>
   );
