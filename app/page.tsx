@@ -4,33 +4,25 @@
 // 클러스터 Anomaly Map — 탐지 화면 (프로덕션 콘솔 관례 차용)
 //   · Grafana Fleet overview: 상단 KPI 스트립 — 한 장의 스냅샷으로 고우선 이슈 파악
 //   · Datadog Host Map: 검색 필터(불일치 디밍) + 셀 hover 미리보기, 클릭 → 드릴다운
+//   · 데이터: GET /overview(KPI 스트립) + GET /node-map(허니콤) — 30s 자동 갱신
 //   · 파드 상세 = /clusters/[node]/[pod] · 노드 상세 = /clusters/[node]
 // ───────────────────────────────────────────────────────────────────────────
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { useNodesQuery, usePodsQuery } from "./lib/api/queries";
+import { useNodeMapQuery, useOverviewQuery } from "./lib/api/queries";
+import type { NodeMapPod } from "./lib/api/types";
 import {
   C_CALM,
   C_CRIT,
   C_NODATA,
   C_WARN,
-  clusterHealth,
-  clusterIssues,
   DISPLAY_STATUS_TONE,
-  FILL_LABEL,
-  FILL_ORDER,
-  type FillKey,
   HEX_CLIP,
-  nodeDisplayStatus,
-  nodeGpu,
-  NODES,
-  ORDERED,
-  type Pod,
-  RAMP_CSS,
+  type NodeDisplayStatus,
 } from "./lib/cluster";
-import { PodHoneycomb } from "./lib/honeycomb";
+import { NodeMapHoneycomb } from "./lib/honeycomb";
 import { LegendHex } from "./lib/ui";
 
 function NavIcon({ active, children }: { active?: boolean; children: React.ReactNode }) {
@@ -69,6 +61,22 @@ function formatGeneratedAt(value?: string) {
   }).format(date);
 }
 
+// 백엔드 노드 status 문자열 → 표시 상태 토큰
+function nodeDisplayStatusOf(status: string): NodeDisplayStatus {
+  const s = status.toLowerCase();
+  if (s === "down" || s === "notready" || s === "not_ready") return "down";
+  if (s === "critical" || s === "crit") return "crit";
+  if (s === "warning" || s === "warn" || s === "degraded") return "warn";
+  return "ok";
+}
+
+const DIMENSION_LABEL: Record<string, string> = {
+  cpu: "CPU",
+  network: "Network",
+  memory: "Memory",
+  gpu: "GPU",
+};
+
 // ── Fleet KPI 스트립 칩 (Grafana fleet overview 관례) ────────────────────────
 function Kpi({
   label,
@@ -95,56 +103,46 @@ function Kpi({
 }
 
 export default function Home() {
-  const [fill, setFill] = useState<FillKey>("anomaly");
   const [query, setQuery] = useState("");
-  const nodesQuery = useNodesQuery();
-  const podsQuery = usePodsQuery();
+  const nodeMapQuery = useNodeMapQuery();
+  const overviewQuery = useOverviewQuery();
 
-  const pods = useMemo(() => NODES.flatMap((n) => n.pods), []);
-  const issues = useMemo(() => clusterIssues(), []);
-  const health = useMemo(() => clusterHealth(), []);
-  const statusCounts = useMemo(() => {
-    const counts = { ok: 0, warn: 0, crit: 0, down: 0 };
-    for (const node of NODES) counts[nodeDisplayStatus(node)]++;
-    return counts;
-  }, []);
-  const gpuFleet = useMemo(() => {
-    const gpuNodes = NODES.filter((n) => n.gpu);
-    const devices = gpuNodes.reduce((s, n) => s + (nodeGpu(n)?.views.length ?? 0), 0);
-    return { nodes: gpuNodes.length, devices };
-  }, []);
-
-  const critCount = issues.filter((i) => i.anomaly.sev === "crit").length;
-  const warnCount = issues.length - critCount;
-  const noDataCount = pods.filter((p) => p.cpu < 0).length;
+  const overview = overviewQuery.data;
+  const nodes = useMemo(
+    () => [...(nodeMapQuery.data?.nodes ?? [])].sort((a, b) => b.pods.length - a.pods.length),
+    [nodeMapQuery.data],
+  );
 
   const q = query.trim().toLowerCase();
-  const podMatches = (nodeName: string, pod: Pod) =>
-    !q || pod.name.toLowerCase().includes(q) || nodeName.toLowerCase().includes(q);
+  const podMatches = (nodeName: string, pod: NodeMapPod) =>
+    !q ||
+    pod.pod.toLowerCase().includes(q) ||
+    pod.namespace.toLowerCase().includes(q) ||
+    nodeName.toLowerCase().includes(q);
+  const podTotal = nodes.reduce((s, n) => s + n.pods.length, 0);
   const matchCount = q
-    ? NODES.reduce((s, n) => s + n.pods.filter((p) => podMatches(n.name, p)).length, 0)
-    : pods.length;
-  const apiPods = podsQuery.data?.pods ?? [];
-  const apiError = nodesQuery.error ?? podsQuery.error;
-  const apiGeneratedAt = formatGeneratedAt(nodesQuery.data?.generated_at ?? podsQuery.data?.generated_at);
+    ? nodes.reduce((s, n) => s + n.pods.filter((p) => podMatches(n.name, p)).length, 0)
+    : podTotal;
+
+  const apiError = nodeMapQuery.error ?? overviewQuery.error;
+  const apiGeneratedAt = formatGeneratedAt(nodeMapQuery.data?.generated_at ?? overview?.generated_at);
   const apiStatus =
-    nodesQuery.isLoading || podsQuery.isLoading
+    nodeMapQuery.isPending || overviewQuery.isPending
       ? "API 연결 중"
       : apiError
         ? "API 오류"
-        : `${nodesQuery.data?.nodes.length ?? 0} nodes / ${apiPods.length} pods`;
+        : `${nodes.length} nodes / ${podTotal} pods`;
 
-  const weakest = {
-    label: { cpu: "CPU", network: "Network", memory: "Memory", gpu: "GPU" }[health.dominant] ?? health.dominant,
-    value:
-      health.dominant === "cpu"
-        ? health.cpu
-        : health.dominant === "network"
-          ? health.net
-          : health.dominant === "memory"
-            ? health.mem
-            : (health.gpu ?? 1),
-  };
+  const critCount = overview?.issues.critical ?? 0;
+  const warnCount = overview?.issues.warning ?? 0;
+
+  const weakest = overview
+    ? {
+        label: DIMENSION_LABEL[overview.weakest.dimension] ?? overview.weakest.dimension,
+        health: overview.weakest.health,
+        status: overview.weakest.status,
+      }
+    : null;
   const healthClass = (v: number) =>
     v < 0.7 ? "text-rose-600" : v < 0.85 ? "text-amber-600" : "text-emerald-600";
 
@@ -216,8 +214,8 @@ export default function Home() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="파드 / 노드 필터"
-              className="w-40 bg-transparent text-[12px] text-slate-700 outline-none placeholder:text-slate-400"
+              placeholder="파드 / 네임스페이스 / 노드 필터"
+              className="w-44 bg-transparent text-[12px] text-slate-700 outline-none placeholder:text-slate-400"
             />
             {query ? (
               <button
@@ -232,128 +230,156 @@ export default function Home() {
           </label>
           {q ? <span className="text-[11px] font-medium text-slate-400">{matchCount}개 일치</span> : null}
 
-          <span className="flex items-center gap-2 text-[12px]">
-            <span className="flex items-center gap-1 font-medium text-rose-600">
-              <span className="h-2 w-2 rounded-full bg-rose-500" /> {critCount} critical
+          {overview ? (
+            <span className="flex items-center gap-2 text-[12px]">
+              <span className="flex items-center gap-1 font-medium text-rose-600">
+                <span className="h-2 w-2 rounded-full bg-rose-500" /> {critCount} critical
+              </span>
+              <span className="flex items-center gap-1 font-medium text-amber-600">
+                <span className="h-2 w-2 rounded-full bg-amber-500" /> {warnCount} warning
+              </span>
             </span>
-            <span className="flex items-center gap-1 font-medium text-amber-600">
-              <span className="h-2 w-2 rounded-full bg-amber-500" /> {warnCount} warning
-            </span>
-          </span>
-
-          <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
-            <label className="flex items-center gap-1.5 text-[12px] text-slate-500">
-              <span>Fill</span>
-              <select
-                value={fill}
-                onChange={(e) => setFill(e.target.value as FillKey)}
-                className="cursor-pointer rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-medium text-slate-700 outline-none transition-colors hover:border-slate-400 focus:border-sky-400"
-              >
-                {FILL_ORDER.map((k) => (
-                  <option key={k} value={k}>
-                    {FILL_LABEL[k]}
-                    {k === "anomaly" ? " (이상탐지)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          ) : null}
         </div>
 
         {/* 캔버스 */}
         <div className="relative flex-1 overflow-auto bg-white p-6">
-          {/* Fleet KPI 스트립 — 클러스터 스냅샷 한 줄 */}
+          {/* Fleet KPI 스트립 — GET /overview 스냅샷 한 줄 */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
             <Kpi
               label="Nodes"
-              value={NODES.length}
-              sub={(["ok", "warn", "crit", "down"] as const)
-                .filter((k) => statusCounts[k] > 0)
-                .map((k) => (
-                  <span key={k} className="flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[k].dot }} />
-                    {statusCounts[k]} {DISPLAY_STATUS_TONE[k].label}
-                  </span>
-                ))}
+              value={overview?.nodes.total ?? "—"}
+              sub={
+                overview
+                  ? (
+                      [
+                        ["ok", overview.nodes.healthy],
+                        ["warn", overview.nodes.warning],
+                        ["down", overview.nodes.down],
+                      ] as const
+                    )
+                      .filter(([, count]) => count > 0)
+                      .map(([k, count]) => (
+                        <span key={k} className="flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[k].dot }} />
+                          {count} {DISPLAY_STATUS_TONE[k].label}
+                        </span>
+                      ))
+                  : undefined
+              }
             />
             <Kpi
               label="Pods"
-              value={pods.length}
-              sub={`${pods.length - noDataCount} live · ${noDataCount} no-data`}
+              value={overview?.pods.total ?? "—"}
+              sub={overview ? `${overview.pods.live} live · ${overview.pods.no_data} no-data` : undefined}
             />
             <Kpi
               label="Active issues"
-              value={issues.length}
-              valueClass={critCount ? "text-rose-600" : warnCount ? "text-amber-600" : "text-emerald-600"}
+              value={overview?.issues.total ?? "—"}
+              valueClass={
+                !overview
+                  ? "text-slate-800"
+                  : critCount
+                    ? "text-rose-600"
+                    : warnCount
+                      ? "text-amber-600"
+                      : "text-emerald-600"
+              }
               sub={
-                <>
-                  <span className="text-rose-600">{critCount} critical</span>
-                  <span className="text-amber-600">{warnCount} warning</span>
-                </>
+                overview ? (
+                  <>
+                    <span className="text-rose-600">{critCount} critical</span>
+                    <span className="text-amber-600">{warnCount} warning</span>
+                  </>
+                ) : undefined
               }
             />
-            <Kpi label="GPU fleet" value={gpuFleet.nodes} sub={`GPU 노드 · 디바이스 ${gpuFleet.devices}`} />
+            <Kpi
+              label="GPU fleet"
+              value={overview?.gpu.nodes ?? "—"}
+              sub={overview ? `GPU 노드 · 디바이스 ${overview.gpu.devices}` : undefined}
+            />
             <Kpi
               label="Weakest signal"
-              value={weakest.label}
-              valueClass={healthClass(weakest.value)}
-              sub={`cluster health ${Math.round(weakest.value * 100)}%`}
+              value={weakest?.label ?? "—"}
+              valueClass={weakest?.health != null ? healthClass(weakest.health) : "text-slate-800"}
+              sub={
+                weakest
+                  ? weakest.health != null
+                    ? `cluster health ${Math.round(weakest.health * 100)}%`
+                    : weakest.status
+                  : undefined
+              }
             />
           </div>
 
-          {/* 허니콤 맵 (주인공) */}
-          <div className="mt-6">
-            <div className="flex flex-wrap content-start items-start gap-x-10 gap-y-7">
-              {ORDERED.map((node) => {
-                const nodeVisible = !q || node.pods.some((p) => podMatches(node.name, p));
-                return (
-                  <div
-                    key={node.name}
-                    className={`flex flex-col gap-1.5 transition-opacity duration-200 ${nodeVisible ? "" : "opacity-25"}`}
-                  >
-                    {/* 노드 이름 → 노드 페이지 */}
-                    <Link href={`/clusters/${node.name}`} className="group flex w-fit items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[nodeDisplayStatus(node)].dot }} />
-                      <span className="text-[13px] font-semibold text-slate-700 group-hover:text-sky-600 group-hover:underline">
-                        {node.name}
-                      </span>
-                      {node.gpu ? (
-                        <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold text-violet-700">GPU</span>
-                      ) : null}
-                      <span className="text-[12px] text-slate-400">{node.pods.length} pods</span>
-                    </Link>
-
-                    {/* 파드 허니콤 — 클릭 시 파드 상세 페이지로 이동 */}
-                    <PodHoneycomb
-                      node={node}
-                      fill={fill}
-                      matcher={q ? (pod) => podMatches(node.name, pod) : undefined}
-                    />
-                  </div>
-                );
-              })}
+          {/* 허니콤 맵 (주인공) — GET /node-map */}
+          {nodeMapQuery.isPending ? (
+            <div className="mt-16 flex flex-col items-center gap-2 text-slate-400">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-sky-500" />
+              <span className="text-[13px]">노드 맵을 불러오는 중…</span>
             </div>
+          ) : nodeMapQuery.isError && !nodeMapQuery.data ? (
+            <div className="mt-16 flex flex-col items-center gap-2">
+              <p className="text-[14px] font-semibold text-slate-700">노드 맵을 불러오지 못했습니다.</p>
+              <p className="text-[12px] text-slate-500">
+                {nodeMapQuery.error instanceof Error ? nodeMapQuery.error.message : "API 요청이 실패했습니다."}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  nodeMapQuery.refetch();
+                  overviewQuery.refetch();
+                }}
+                className="mt-1 rounded border border-slate-300 bg-white px-3 py-1 text-[12px] font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : nodes.length === 0 ? (
+            <p className="mt-16 text-center text-[13px] text-slate-400">표시할 노드가 없습니다.</p>
+          ) : (
+            <div className="mt-6 pb-12">
+              <div className="flex flex-wrap content-start items-start gap-x-10 gap-y-7">
+                {nodes.map((node) => {
+                  const nodeVisible = !q || node.pods.some((p) => podMatches(node.name, p));
+                  const display = nodeDisplayStatusOf(node.status);
+                  return (
+                    <div
+                      key={node.name}
+                      className={`flex flex-col gap-1.5 transition-opacity duration-200 ${nodeVisible ? "" : "opacity-25"}`}
+                    >
+                      {/* 노드 이름 → 노드 페이지 */}
+                      <Link href={`/clusters/${node.name}`} className="group flex w-fit items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[display].dot }} />
+                        <span className="text-[13px] font-semibold text-slate-700 group-hover:text-sky-600 group-hover:underline">
+                          {node.name}
+                        </span>
+                        {node.gpu ? (
+                          <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold text-violet-700">GPU</span>
+                        ) : null}
+                        <span className="text-[12px] text-slate-400">{node.pods.length} pods</span>
+                      </Link>
 
-            {/* 범례 */}
-            <div className="pointer-events-none sticky bottom-0 mt-6 flex justify-end">
-              <div className="pointer-events-auto flex items-center gap-3 rounded border border-slate-200 bg-white/95 px-3 py-1.5 text-[11px] text-slate-500 shadow-sm backdrop-blur">
-                {fill === "anomaly" ? (
-                  <>
-                    <LegendHex color={C_CALM} label="정상" />
-                    <LegendHex color={C_WARN} label="경고" />
-                    <LegendHex color={C_CRIT} label="위험" />
-                    <LegendHex color={C_NODATA} label="데이터 없음" />
-                  </>
-                ) : (
-                  <>
-                    <span className="font-medium text-slate-600">{FILL_LABEL[fill]} Utilization</span>
-                    <span>0%</span>
-                    <div className="h-2 w-36 rounded-sm" style={{ background: RAMP_CSS }} />
-                    <span>100%</span>
-                  </>
-                )}
+                      {/* 파드 허니콤 — 클릭 시 파드 상세 페이지로 이동 */}
+                      <NodeMapHoneycomb
+                        node={node}
+                        matcher={q ? (pod) => podMatches(node.name, pod) : undefined}
+                      />
+                    </div>
+                  );
+                })}
               </div>
+
             </div>
+          )}
+
+          {/* 범례 — 화면 우하단 고정 */}
+          <div className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded border border-slate-200 bg-white/95 px-3 py-1.5 text-[11px] text-slate-500 shadow-sm backdrop-blur">
+            <LegendHex color={C_CALM} label="정상" />
+            <LegendHex color={C_WARN} label="경고" />
+            <LegendHex color={C_CRIT} label="위험" />
+            <LegendHex color={C_NODATA} label="데이터 없음" />
           </div>
         </div>
       </div>

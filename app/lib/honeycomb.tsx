@@ -7,6 +7,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import type { NodeMapNode, NodeMapPod } from "./api/types";
 import {
   type Anomaly,
   C_CALM,
@@ -188,6 +189,130 @@ function PodTooltip({ pod, anomaly, x, y }: HoverState) {
           style={{ backgroundColor: SEV_TONE[anomaly.sev].bg, color: SEV_TONE[anomaly.sev].text }}
         >
           ⚠ {anomaly.headline}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ── API node-map 허니콤 — GET /node-map 응답(NodeMapNode)을 그대로 그린다 ────
+// 셀 색 = 백엔드가 판정한 status/no_data (live→정상, warning→경고, down→위험).
+// 사용률 지표는 이 엔드포인트에 없으므로 이상탐지 색상 단일 모드.
+
+function mapPodFill(pod: NodeMapPod) {
+  if (pod.status === "down") return C_CRIT;
+  if (pod.status === "warning") return C_WARN;
+  return pod.no_data ? C_NODATA : C_CALM;
+}
+
+function mapPodSev(pod: NodeMapPod): "warn" | "crit" | null {
+  return pod.status === "down" ? "crit" : pod.status === "warning" ? "warn" : null;
+}
+
+type MapHoverState = { pod: NodeMapPod; x: number; y: number };
+
+export function NodeMapHoneycomb({
+  node,
+  matcher,
+}: {
+  node: NodeMapNode;
+  matcher?: (pod: NodeMapPod) => boolean; // 검색 필터 — 불일치 파드는 디밍
+}) {
+  const router = useRouter();
+  const comb = honeycomb(node.pods.length);
+  const [hover, setHover] = useState<MapHoverState | null>(null);
+
+  return (
+    <>
+      <svg
+        viewBox={`0 0 ${comb.width} ${comb.height}`}
+        width={comb.width}
+        height={comb.height}
+        role="img"
+        aria-label={`${node.name} 파드 ${node.pods.length}개`}
+        className="block"
+        onMouseLeave={() => setHover(null)}
+      >
+        {node.pods.map((pod, i) => {
+          const cell = comb.cells[i];
+          const sev = mapPodSev(pod);
+          const dimmed = matcher ? !matcher(pod) : false;
+          return (
+            <polygon
+              key={`${pod.namespace}/${pod.pod}`}
+              points={hexPath(cell.cx, cell.cy, HEX_R)}
+              fill={mapPodFill(pod)}
+              stroke={sev ? SEV_TONE[sev].stroke : "#ffffff"}
+              strokeWidth={sev ? 1.6 : 1.2}
+              opacity={dimmed ? 0.15 : 1}
+              className={`cursor-pointer transition-[fill,opacity] duration-200 hover:opacity-70 ${
+                sev === "crit" && !dimmed ? "animate-pulse" : ""
+              }`}
+              aria-label={pod.pod}
+              onMouseEnter={(e) => setHover({ pod, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : h))}
+              onClick={() => router.push(`/clusters/${node.name}/${pod.pod}`)}
+            />
+          );
+        })}
+      </svg>
+      {hover ? <MapPodTooltip {...hover} /> : null}
+    </>
+  );
+}
+
+function MapPodTooltip({ pod, x, y }: MapHoverState) {
+  const issues = pod.issues ?? [];
+  const sev = mapPodSev(pod);
+  const tone =
+    sev === "crit"
+      ? { dot: C_CRIT, label: "위험" }
+      : sev === "warn"
+        ? { dot: C_WARN, label: "경고" }
+        : pod.no_data
+          ? { dot: "#94a3b8", label: "데이터 없음" }
+          : { dot: "#10b981", label: "정상" };
+  const issueTone = SEV_TONE[sev ?? "warn"];
+
+  // 화면 우/하단에서 잘리지 않게 — 가까우면 커서 반대편으로 뒤집어 배치
+  const W = 224; // w-56
+  const H = 84 + issues.length * 32 + (pod.no_data ? 28 : 0); // 대략 높이
+  const left = typeof window !== "undefined" && x + 14 + W > window.innerWidth ? Math.max(8, x - W - 14) : x + 14;
+  const top = typeof window !== "undefined" && y + 14 + H > window.innerHeight ? Math.max(8, y - H) : y + 14;
+
+  return (
+    <div
+      role="tooltip"
+      style={{ left, top }}
+      className="pointer-events-none fixed z-50 w-56 rounded-lg border border-slate-200 bg-white/95 p-3 text-slate-900 shadow-lg backdrop-blur"
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: tone.dot }} />
+        <span className="truncate font-mono text-[12px] font-semibold">{pod.pod}</span>
+      </div>
+      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+        <span>{pod.namespace}</span>
+        <span>·</span>
+        <span style={{ color: tone.dot }} className="font-medium">
+          {tone.label}
+        </span>
+      </div>
+
+      {pod.no_data ? (
+        <p className="mt-2 text-[11px] text-slate-500">텔레메트리가 수집되지 않습니다.</p>
+      ) : null}
+
+      {issues.length ? (
+        <div className="mt-2 flex flex-col gap-1">
+          {issues.map((issue) => (
+            <div
+              key={issue}
+              className="rounded px-2 py-1.5 text-[11px] font-medium"
+              style={{ backgroundColor: issueTone.bg, color: issueTone.text }}
+            >
+              ⚠ {issue}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

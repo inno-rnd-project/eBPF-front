@@ -1116,8 +1116,8 @@ const EVT_DOT: Record<string, string> = { crit: "#e0473a", warn: "#f0a93b", info
 function agoFmt(s: number) {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
 }
-function GpuEventsPanel({ events }: { events: GpuEvent[] }) {
-  if (events.length === 0) return <p className="text-[12px] text-slate-500">이벤트 없음</p>;
+function GpuEventsPanel({ events, empty = "이벤트 없음" }: { events: GpuEvent[]; empty?: string }) {
+  if (events.length === 0) return <p className="text-[12px] text-slate-500">{empty}</p>;
   return (
     <ol className="relative space-y-3 border-l border-slate-200 pl-5">
       {events.map((e, i) => (
@@ -1136,6 +1136,89 @@ function GpuEventsPanel({ events }: { events: GpuEvent[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+// ── Anomalies — 이 디바이스의 이상 내역 (활성 이상 신호 + warn/crit 이벤트 이력) ──
+// 배너(verdict)가 "왜 안 되는가"의 결론이라면 이 탭은 "무슨 이상이 있(었)나"의 목록.
+// verdict 는 우세 실패 모드 하나를 고르지만, 여기선 활성 신호를 전부 나열한다 (DCGM/NVML 실측).
+type GpuActiveAnomaly = { severity: Severity; code: string; text: string };
+
+function gpuActiveAnomalies(view: GpuDeviceView): GpuActiveAnomaly[] {
+  const d = view.device;
+  const sm = Math.round(d.util * 100);
+  const items: GpuActiveAnomaly[] = [];
+  if (d.hwThermalSlowdown)
+    items.push({
+      severity: "crit",
+      code: "HW Thermal Slowdown",
+      text: `온도 ${d.tempC}°C ≥ slowdown ${d.tempSlowdownC}°C — 클럭 ${d.graphicsClockMHz}MHz 강제 하향`,
+    });
+  if (d.throttleReasons.includes("sw_power_cap"))
+    items.push({
+      severity: "warn",
+      code: "SW Power Cap",
+      text: `전력 ${d.powerW}W ≈ limit ${d.powerLimitW}W — power brake 활성`,
+    });
+  if (view.idle) {
+    const cause =
+      view.dominantCause === "pcie_saturated"
+        ? `H2D/D2H 복사가 PCIe ${d.pcieGbs}GB/s(${Math.round((d.pcieGbs / d.pcieMaxGbs) * 100)}%)를 포화 — 피딩 정체`
+        : view.dominantCause === "network_stall"
+          ? "집합통신(all-reduce)이 tcp 재전송으로 블로킹 — 연산 대기"
+          : "도달하는 GPU 워크로드 없음 — 미스케줄";
+    // severity 기준은 deviceVerdict 의 idle 분기(health < 0.45 → crit)와 동일하게 유지
+    items.push({ severity: view.health < 0.45 ? "crit" : "warn", code: "GPU Idle", text: `SM active ${sm}% — ${cause}` });
+  }
+  return items;
+}
+
+function GpuAnomaliesPanel({ view }: { view: GpuDeviceView }) {
+  const active = gpuActiveAnomalies(view);
+  const history = view.events.filter((e) => e.severity !== "info");
+  return (
+    <div className="space-y-6">
+      <GpuSection title="활성 이상" hint="지금 걸려 있는 이상 신호 — DCGM/NVML 실측">
+        {active.length ? (
+          <ul className="space-y-2">
+            {active.map((a, i) => {
+              const tone = SEV_TONE[a.severity];
+              return (
+                <li
+                  key={a.code}
+                  className="anim-rise flex items-start gap-2.5 rounded-xl border bg-white p-3"
+                  style={{ borderColor: `${tone.stroke}55`, animationDelay: `${i * 45}ms` }}
+                >
+                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: tone.fill }} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold"
+                        style={{ backgroundColor: tone.bg, color: tone.text }}
+                      >
+                        {a.code}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: tone.text }}>
+                        {tone.label}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] leading-snug text-slate-600">{a.text}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="flex items-center gap-1.5 text-[12px] text-slate-600">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            활성 이상 없음 — 정상 활용 중
+          </p>
+        )}
+      </GpuSection>
+      <GpuSection title="이상 이벤트 이력" hint="warn/crit 만 — 전체 로그(info 포함)는 Events 탭">
+        <GpuEventsPanel events={history} empty="이상 이벤트 없음" />
+      </GpuSection>
+    </div>
   );
 }
 
@@ -1174,12 +1257,23 @@ export function GpuDeviceDetail({ view, perPodAvailable, agent, node }: { view: 
   // 정상(ok)일 땐 배너 없이 데이터만 — 사용자가 직접 보고 판단
   const showVerdict = view.verdict.severity !== "ok";
 
-  // 탭 정리: 7개 pill → 4개 underline. 라이브 게이지는 탭 밖(헤더 근처)으로 승격.
+  // 탭 구성 — 라이브 게이지는 탭 밖(헤더 근처)으로 승격.
+  //  · Anomalies = 이 디바이스의 이상 내역 (활성 신호 + warn/crit 이력) — 이상 있으면 초기 탭
   //  · Workloads = Pods + Processes (이 GPU를 누가 쓰나)
   //  · Profiling = CUDA · Memory · Bandwidth (디바이스 내부 심층, Run:ai "profiling" 관례)
   //  · Events · Agent
   const podCount = new Set(view.processes.map((p) => p.pod)).size;
+  const activeAnomalies = gpuActiveAnomalies(view);
+  const anomalyEvents = view.events.filter((e) => e.severity !== "info");
+  const anomalyCount = activeAnomalies.length + anomalyEvents.length;
   const subtabs: TabDef[] = [
+    {
+      id: "anomalies",
+      label: "Anomalies",
+      badge: anomalyCount || undefined,
+      alert: activeAnomalies.some((a) => a.severity === "crit") || anomalyEvents.some((e) => e.severity === "crit"),
+      content: <GpuAnomaliesPanel view={view} />,
+    },
     {
       id: "workloads",
       label: "Workloads",
@@ -1214,7 +1308,6 @@ export function GpuDeviceDetail({ view, perPodAvailable, agent, node }: { view: 
       id: "events",
       label: "Events",
       badge: view.events.length || undefined,
-      alert: view.events.some((e) => e.severity === "crit"),
       content: <GpuEventsPanel events={view.events} />,
     },
     {
@@ -1232,7 +1325,8 @@ export function GpuDeviceDetail({ view, perPodAvailable, agent, node }: { view: 
       <GpuLivePanel device={view.device} series={view.series} />
       <section>
         <SectionTitle>상세 분석</SectionTitle>
-        <Tabs tabs={subtabs} initial="workloads" />
+        {/* 활성 이상이 있으면 Anomalies 를 초기 탭으로 — 이력만 있을 땐 배지로만 알림 */}
+        <Tabs tabs={subtabs} initial={activeAnomalies.length ? "anomalies" : "workloads"} />
       </section>
     </div>
   );
