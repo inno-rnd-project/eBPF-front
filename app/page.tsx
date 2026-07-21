@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { useNodeMapQuery, useOverviewQuery } from "./lib/api/queries";
+import { nodeDisplayStatusOf } from "./lib/api/status";
 import type { NodeMapPod } from "./lib/api/types";
 import {
   C_CALM,
@@ -20,16 +21,23 @@ import {
   C_WARN,
   DISPLAY_STATUS_TONE,
   HEX_CLIP,
-  type NodeDisplayStatus,
 } from "./lib/cluster";
 import { NodeMapHoneycomb } from "./lib/honeycomb";
 import { LegendHex } from "./lib/ui";
 
-function NavIcon({ active, children }: { active?: boolean; children: React.ReactNode }) {
+function NavIcon({
+  active,
+  children,
+}: {
+  active?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <span
       className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-        active ? "bg-white/10 text-white" : "text-slate-500 hover:bg-white/5 hover:text-slate-300"
+        active
+          ? "bg-white/10 text-white"
+          : "text-slate-500 hover:bg-white/5 hover:text-slate-300"
       }`}
     >
       {children}
@@ -61,15 +69,6 @@ function formatGeneratedAt(value?: string) {
   }).format(date);
 }
 
-// 백엔드 노드 status 문자열 → 표시 상태 토큰
-function nodeDisplayStatusOf(status: string): NodeDisplayStatus {
-  const s = status.toLowerCase();
-  if (s === "down" || s === "notready" || s === "not_ready") return "down";
-  if (s === "critical" || s === "crit") return "crit";
-  if (s === "warning" || s === "warn" || s === "degraded") return "warn";
-  return "ok";
-}
-
 const DIMENSION_LABEL: Record<string, string> = {
   cpu: "CPU",
   network: "Network",
@@ -91,8 +90,14 @@ function Kpi({
 }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`mt-0.5 text-[17px] font-bold leading-tight tabular-nums ${valueClass}`}>{value}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
+      <div
+        className={`mt-0.5 text-[17px] font-bold leading-tight tabular-nums ${valueClass}`}
+      >
+        {value}
+      </div>
       {sub ? (
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-medium text-slate-500">
           {sub}
@@ -109,7 +114,10 @@ export default function Home() {
 
   const overview = overviewQuery.data;
   const nodes = useMemo(
-    () => [...(nodeMapQuery.data?.nodes ?? [])].sort((a, b) => b.pods.length - a.pods.length),
+    () =>
+      [...(nodeMapQuery.data?.nodes ?? [])].sort(
+        (a, b) => b.pods.length - a.pods.length,
+      ),
     [nodeMapQuery.data],
   );
 
@@ -121,11 +129,16 @@ export default function Home() {
     nodeName.toLowerCase().includes(q);
   const podTotal = nodes.reduce((s, n) => s + n.pods.length, 0);
   const matchCount = q
-    ? nodes.reduce((s, n) => s + n.pods.filter((p) => podMatches(n.name, p)).length, 0)
+    ? nodes.reduce(
+        (s, n) => s + n.pods.filter((p) => podMatches(n.name, p)).length,
+        0,
+      )
     : podTotal;
 
   const apiError = nodeMapQuery.error ?? overviewQuery.error;
-  const apiGeneratedAt = formatGeneratedAt(nodeMapQuery.data?.generated_at ?? overview?.generated_at);
+  const apiGeneratedAt = formatGeneratedAt(
+    nodeMapQuery.data?.generated_at ?? overview?.generated_at,
+  );
   const apiStatus =
     nodeMapQuery.isPending || overviewQuery.isPending
       ? "API 연결 중"
@@ -138,13 +151,19 @@ export default function Home() {
 
   const weakest = overview
     ? {
-        label: DIMENSION_LABEL[overview.weakest.dimension] ?? overview.weakest.dimension,
+        label:
+          DIMENSION_LABEL[overview.weakest.dimension] ??
+          overview.weakest.dimension,
         health: overview.weakest.health,
         status: overview.weakest.status,
       }
     : null;
   const healthClass = (v: number) =>
-    v < 0.7 ? "text-rose-600" : v < 0.85 ? "text-amber-600" : "text-emerald-600";
+    v < 0.7
+      ? "text-rose-600"
+      : v < 0.85
+        ? "text-amber-600"
+        : "text-emerald-600";
 
   return (
     <main className="flex min-h-screen bg-white text-slate-900">
@@ -155,7 +174,12 @@ export default function Home() {
           className={`mb-3 flex h-8 w-8 items-center justify-center bg-linear-to-br from-indigo-500 to-sky-500 text-white ${HEX_CLIP}`}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-            <path d="M12 2.5l8.5 4.9v9.2L12 21.5 3.5 16.6V7.4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <path
+              d="M12 2.5l8.5 4.9v9.2L12 21.5 3.5 16.6V7.4z"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            />
             <circle cx="12" cy="12" r="2.4" fill="currentColor" />
           </svg>
         </span>
@@ -165,13 +189,25 @@ export default function Home() {
           </svg>
         </NavIcon>
         <NavIcon>
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          >
             <rect x="3" y="4" width="18" height="6" rx="1.5" />
             <rect x="3" y="14" width="18" height="6" rx="1.5" />
           </svg>
         </NavIcon>
         <NavIcon>
-          <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+          >
             <circle cx="6" cy="6" r="2.5" />
             <circle cx="18" cy="6" r="2.5" />
             <circle cx="12" cy="18" r="2.5" />
@@ -185,13 +221,24 @@ export default function Home() {
         {/* 상단 탭 줄 */}
         <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-2 text-[12px] text-slate-500">
           <span className="flex items-center gap-1.5 font-medium text-slate-700">
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor"><rect x="2" y="2" width="5" height="5" /><rect x="9" y="2" width="5" height="5" /><rect x="2" y="9" width="5" height="5" /><rect x="9" y="9" width="5" height="5" /></svg>
+            <svg
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill="currentColor"
+            >
+              <rect x="2" y="2" width="5" height="5" />
+              <rect x="9" y="2" width="5" height="5" />
+              <rect x="2" y="9" width="5" height="5" />
+              <rect x="9" y="9" width="5" height="5" />
+            </svg>
             Anomaly Map
           </span>
           <span>eBPF Observability</span>
           <span
             className={`ml-auto rounded px-2 py-0.5 font-medium ${
-              apiError ? "bg-rose-50 text-rose-600" : "bg-slate-100 text-slate-600"
+              apiError
+                ? "bg-rose-50 text-rose-600"
+                : "bg-slate-100 text-slate-600"
             }`}
             title={apiError instanceof Error ? apiError.message : undefined}
           >
@@ -207,7 +254,13 @@ export default function Home() {
 
           {/* 검색 필터 — 불일치 파드는 맵에서 디밍 */}
           <label className="flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2 py-1 transition-colors focus-within:border-sky-400">
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 text-slate-400" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <svg
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5 text-slate-400"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            >
               <circle cx="7" cy="7" r="4.5" />
               <path d="M10.5 10.5L14 14" strokeLinecap="round" />
             </svg>
@@ -222,21 +275,27 @@ export default function Home() {
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label="필터 지우기"
-                className="text-slate-400 transition-colors hover:text-slate-600"
+                className="text-[14px] leading-none text-slate-400 transition-colors hover:text-slate-600"
               >
                 ×
               </button>
             ) : null}
           </label>
-          {q ? <span className="text-[11px] font-medium text-slate-400">{matchCount}개 일치</span> : null}
+          {q ? (
+            <span className="text-[11px] font-medium text-slate-400">
+              {matchCount}개 일치
+            </span>
+          ) : null}
 
           {overview ? (
             <span className="flex items-center gap-2 text-[12px]">
               <span className="flex items-center gap-1 font-medium text-rose-600">
-                <span className="h-2 w-2 rounded-full bg-rose-500" /> {critCount} critical
+                <span className="h-2 w-2 rounded-full bg-rose-500" />{" "}
+                {critCount} critical
               </span>
               <span className="flex items-center gap-1 font-medium text-amber-600">
-                <span className="h-2 w-2 rounded-full bg-amber-500" /> {warnCount} warning
+                <span className="h-2 w-2 rounded-full bg-amber-500" />{" "}
+                {warnCount} warning
               </span>
             </span>
           ) : null}
@@ -261,7 +320,12 @@ export default function Home() {
                       .filter(([, count]) => count > 0)
                       .map(([k, count]) => (
                         <span key={k} className="flex items-center gap-1">
-                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[k].dot }} />
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{
+                              backgroundColor: DISPLAY_STATUS_TONE[k].dot,
+                            }}
+                          />
                           {count} {DISPLAY_STATUS_TONE[k].label}
                         </span>
                       ))
@@ -271,7 +335,11 @@ export default function Home() {
             <Kpi
               label="Pods"
               value={overview?.pods.total ?? "—"}
-              sub={overview ? `${overview.pods.live} live · ${overview.pods.no_data} no-data` : undefined}
+              sub={
+                overview
+                  ? `${overview.pods.live} live · ${overview.pods.no_data} no-data`
+                  : undefined
+              }
             />
             <Kpi
               label="Active issues"
@@ -297,12 +365,20 @@ export default function Home() {
             <Kpi
               label="GPU fleet"
               value={overview?.gpu.nodes ?? "—"}
-              sub={overview ? `GPU 노드 · 디바이스 ${overview.gpu.devices}` : undefined}
+              sub={
+                overview
+                  ? `GPU 노드 · 디바이스 ${overview.gpu.devices}`
+                  : undefined
+              }
             />
             <Kpi
               label="Weakest signal"
               value={weakest?.label ?? "—"}
-              valueClass={weakest?.health != null ? healthClass(weakest.health) : "text-slate-800"}
+              valueClass={
+                weakest?.health != null
+                  ? healthClass(weakest.health)
+                  : "text-slate-800"
+              }
               sub={
                 weakest
                   ? weakest.health != null
@@ -321,9 +397,13 @@ export default function Home() {
             </div>
           ) : nodeMapQuery.isError && !nodeMapQuery.data ? (
             <div className="mt-16 flex flex-col items-center gap-2">
-              <p className="text-[14px] font-semibold text-slate-700">노드 맵을 불러오지 못했습니다.</p>
+              <p className="text-[14px] font-semibold text-slate-700">
+                노드 맵을 불러오지 못했습니다.
+              </p>
               <p className="text-[12px] text-slate-500">
-                {nodeMapQuery.error instanceof Error ? nodeMapQuery.error.message : "API 요청이 실패했습니다."}
+                {nodeMapQuery.error instanceof Error
+                  ? nodeMapQuery.error.message
+                  : "API 요청이 실패했습니다."}
               </p>
               <button
                 type="button"
@@ -337,12 +417,15 @@ export default function Home() {
               </button>
             </div>
           ) : nodes.length === 0 ? (
-            <p className="mt-16 text-center text-[13px] text-slate-400">표시할 노드가 없습니다.</p>
+            <p className="mt-16 text-center text-[13px] text-slate-400">
+              표시할 노드가 없습니다.
+            </p>
           ) : (
             <div className="mt-6 pb-12">
               <div className="flex flex-wrap content-start items-start gap-x-10 gap-y-7">
                 {nodes.map((node) => {
-                  const nodeVisible = !q || node.pods.some((p) => podMatches(node.name, p));
+                  const nodeVisible =
+                    !q || node.pods.some((p) => podMatches(node.name, p));
                   const display = nodeDisplayStatusOf(node.status);
                   return (
                     <div
@@ -350,27 +433,40 @@ export default function Home() {
                       className={`flex flex-col gap-1.5 transition-opacity duration-200 ${nodeVisible ? "" : "opacity-25"}`}
                     >
                       {/* 노드 이름 → 노드 페이지 */}
-                      <Link href={`/clusters/${node.name}`} className="group flex w-fit items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: DISPLAY_STATUS_TONE[display].dot }} />
+                      <Link
+                        href={`/clusters/${node.name}`}
+                        className="group flex w-fit items-center gap-1.5"
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{
+                            backgroundColor: DISPLAY_STATUS_TONE[display].dot,
+                          }}
+                        />
                         <span className="text-[13px] font-semibold text-slate-700 group-hover:text-sky-600 group-hover:underline">
                           {node.name}
                         </span>
                         {node.gpu ? (
-                          <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold text-violet-700">GPU</span>
+                          <span className="rounded bg-violet-100 px-1 py-0.5 text-[9px] font-bold text-violet-700">
+                            GPU
+                          </span>
                         ) : null}
-                        <span className="text-[12px] text-slate-400">{node.pods.length} pods</span>
+                        <span className="text-[12px] text-slate-400">
+                          {node.pods.length} pods
+                        </span>
                       </Link>
 
                       {/* 파드 허니콤 — 클릭 시 파드 상세 페이지로 이동 */}
                       <NodeMapHoneycomb
                         node={node}
-                        matcher={q ? (pod) => podMatches(node.name, pod) : undefined}
+                        matcher={
+                          q ? (pod) => podMatches(node.name, pod) : undefined
+                        }
                       />
                     </div>
                   );
                 })}
               </div>
-
             </div>
           )}
 

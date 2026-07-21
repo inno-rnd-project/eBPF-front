@@ -77,6 +77,14 @@ body {
   outline-offset: 2px;
   border-radius: 5px;
 }
+/* 텍스트 입력은 클릭만으로도 :focus-visible 이 매칭되고, 이 룰은 레이어 밖이라
+   Tailwind outline-none 을 이긴다. 포커스 표시는 감싼 컨테이너의
+   focus-within 보더가 담당하므로 안쪽 링은 끈다(이중 테두리 방지). */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
 
 /* ── 모션 토큰 ───────────────────────────────────────────────────────────────
    상용 옵저버빌리티 콘솔(Grafana/Datadog) 관례: 모션은 "조용한 기본 + 이상에만 소비".
