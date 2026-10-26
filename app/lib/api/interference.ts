@@ -7,7 +7,9 @@ import type {
   IncidentsResponse,
   MemoryResponse,
   NodeDetailResponse,
+  NodePodsResponse,
   NodeVitalsResponse,
+  PodDetailResponse,
   PressureResponse,
   PressureScope,
   TopologyResponse,
@@ -83,6 +85,16 @@ export function fetchNodeVitals(params: NodeVitalsParams) {
 
 export function fetchNodeDetail(node: string) {
   return api.get(`node/${encodeURIComponent(node)}`).json<NodeDetailResponse>();
+}
+
+export function fetchPodDetail(namespace: string, pod: string) {
+  return api
+    .get(`pod/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}`)
+    .json<PodDetailResponse>();
+}
+
+export function fetchNodePods(node: string) {
+  return api.get(`node/${encodeURIComponent(node)}/pods`).json<NodePodsResponse>();
 }
 
 export function fetchPressure(params: PressureParams) {

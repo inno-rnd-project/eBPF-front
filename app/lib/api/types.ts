@@ -56,6 +56,8 @@ export type NodeMapPod = {
   no_data: boolean;
   /** 이슈가 없으면 백엔드가 필드 자체를 생략한다 */
   issues?: string[];
+  /** no_data 일 때만 — 예: no_traffic */
+  no_data_reason?: string;
 };
 
 export type NodeMapNode = {
@@ -372,6 +374,12 @@ export type IncidentStatus = "firing" | "resolved";
 
 export type IncidentEpisode = {
   alertname: string;
+  title?: string;
+  summary?: string;
+  /** node/pod 스코프 — 해당 라벨이 있을 때만 */
+  scope?: string;
+  node?: string;
+  pod?: string;
   component: string;
   severity: string;
   status: IncidentStatus;
@@ -416,13 +424,77 @@ export type MemoryResponse = {
   pods: MemoryPod[];
 };
 
+/** GET /node/{node}/pods — 노드 파드 자원 표 (limit 없는 pod 는 *_percent 필드 생략) */
+export type NodePodResource = {
+  namespace: string;
+  pod: string;
+  uid: string;
+  phase: string;
+  /** low/elevated/high */
+  severity?: string;
+  unmeasured_dimensions?: string[];
+  /** 미관측 pod 만 채워진다 */
+  unobserved_reason?: string;
+  cpu_percent?: number;
+  cpu_usage_cores?: number;
+  memory_percent?: number;
+  memory_working_set_bytes?: number;
+  network_bytes_per_sec?: number;
+};
+
+export type NodePodsResponse = {
+  generated_at: string;
+  node: string;
+  pods: NodePodResource[];
+};
+
+/** GET /pod/{namespace}/{pod} — 미관측 pod 는 필드 생략 + summary 사유 (404 아님) */
+export type PodDetailResponse = {
+  generated_at: string;
+  summary: string;
+  namespace: string;
+  pod: string;
+  uid?: string;
+  node?: string;
+  pod_ip?: string;
+  created_by_kind?: string;
+  created_by_name?: string;
+  /** 1 - pod pressure score. 미산출 차원은 엔트리 생략 */
+  health: Partial<Record<HealthDimensionKey, number>>;
+  /** limit 이 없어 pressure 를 산출할 수 없는 차원 (cpu / memory) */
+  unmeasured_dimensions?: string[];
+  vitals: {
+    cpu_percent?: number;
+    cpu_usage_cores?: number;
+    memory_percent?: number;
+    memory_working_set_bytes?: number;
+  };
+  cpu: {
+    /** 최근 5분 CFS period 중 throttle 비율 (0-1) */
+    throttled_ratio?: number;
+    throttled_periods_5m?: number;
+    total_periods_5m?: number;
+    limit_cores?: number;
+    quota_microseconds?: number;
+    period_microseconds?: number;
+  };
+  network: {
+    drop_per_sec?: number;
+    retrans_per_sec?: number;
+    /** 분위수가 아닌 최대 smoothed RTT */
+    max_srtt_seconds?: number;
+  };
+};
+
 export type NodeVitalsResponse = {
   generated_at: string;
   summary: string;
   node: string;
   /** pod 사용량/limit 비율의 노드 평균 — limit 없는 pod 는 제외 */
   cpu_percent: number;
+  cpu_usage_cores?: number;
   memory_percent: number;
+  memory_working_set_bytes?: number;
   /** GPU 없는 노드는 생략될 수 있다 */
   gpu_percent?: number;
   gpu_memory_percent?: number;
@@ -432,7 +504,10 @@ export type NodeVitalsResponse = {
 
 export type NodeTopPod = {
   dimension: string;
+  /** "namespace/pod" 결합 문자열 */
   pod: string;
+  namespace?: string;
+  pod_name?: string;
   pressure: number;
 };
 
@@ -442,7 +517,13 @@ export type NodeDetailResponse = {
   summary: string;
   node: string;
   status: string;
-  overall: number;
+  /** healthy/warning/critical — pressure·alert 를 종합한 노드 단일 판정 */
+  status_unified?: string;
+  /** pressure 또는 alert — status 판정 근거 */
+  status_basis?: string;
+  /** status_basis=alert 일 때 판정에 쓰인 alertname */
+  status_alerts?: string[];
+  overall: number | null;
   dominant_dimension: string;
   /** 압박 top1 과 top2 차원 격차 — gpu-rca 와 동일 축 */
   confidence: number;
@@ -450,6 +531,8 @@ export type NodeDetailResponse = {
   pressure: Partial<Record<HealthDimensionKey, number>>;
   /** node:*_health_score:5m — cluster health 의 노드 차원 판 */
   health: Partial<Record<HealthDimensionKey, number>>;
+  /** 측정 불가 사유 — 예: cpu=no_cpu_limit_pods, gpu=no_gpu */
+  health_notes?: Partial<Record<HealthDimensionKey, string>>;
   top_pods: NodeTopPod[];
 };
 
@@ -458,8 +541,10 @@ export type PressureScope = "node" | "pod";
 export type PressureRankingEntry = {
   rank: number;
   node: string;
-  /** scope=pod 일 때만 채워진다 */
+  /** scope=pod 일 때만 — 문서와 달리 "namespace/pod" 결합 문자열로 온다 */
   pod?: string;
+  namespace?: string;
+  pod_name?: string;
   pressure: number;
   severity: string;
 };
@@ -797,6 +882,8 @@ export type GpuDevice = {
   model: string;
   /** 성능성 throttle 은 degraded, slowdown 임계 근접·NVML 오류율 초과는 warning */
   status: string;
+  /** 백엔드 idle 판정 */
+  idle?: boolean;
   utilization_percent?: number;
   /** gpm sm_occupancy — 데이터센터 GPU 에서만 채워진다 */
   sm_active_percent?: number;

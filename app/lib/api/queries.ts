@@ -18,12 +18,15 @@ import type {
   NoisyNeighborParams,
   ServiceImpactParams,
 } from "./impact";
+import { isNotFoundError } from "./client";
 import {
   fetchEvents,
   fetchIncidents,
   fetchMemory,
   fetchNodeDetail,
+  fetchNodePods,
   fetchNodeVitals,
+  fetchPodDetail,
   fetchPressure,
   fetchTopology,
 } from "./interference";
@@ -123,6 +126,28 @@ export function nodeMapQueryOptions(params: NodeMapParams = {}) {
     queryFn: () => fetchNodeMap(params),
     staleTime: pinned ? Infinity : 30_000,
     refetchInterval: pinned ? false : 30_000,
+    placeholderData: keepPreviousData,
+    // 미등록 노드 404 는 재시도해도 같은 결과 — 즉시 실패시켜 드릴다운이 notFound() 로 빠지게 한다
+    retry: (count, error) => !isNotFoundError(error) && count < 3,
+  });
+}
+
+export function podDetailQueryOptions(namespace: string, pod: string) {
+  return queryOptions({
+    queryKey: apiQueryKeys.podDetail(namespace, pod),
+    queryFn: () => fetchPodDetail(namespace, pod),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function nodePodsQueryOptions(node: string) {
+  return queryOptions({
+    queryKey: apiQueryKeys.nodePods(node),
+    queryFn: () => fetchNodePods(node),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
     placeholderData: keepPreviousData,
   });
 }
@@ -405,6 +430,15 @@ export function usePodsQuery(namespace?: string) {
 
 export function useNodeMapQuery(params: NodeMapParams = {}) {
   return useQuery(nodeMapQueryOptions(params));
+}
+
+export function useNodePodsQuery(node: string) {
+  return useQuery(nodePodsQueryOptions(node));
+}
+
+/** namespace 를 모르는 동안(node-map 로딩 중)은 비활성 */
+export function usePodDetailQuery(namespace: string | undefined, pod: string) {
+  return useQuery({ ...podDetailQueryOptions(namespace ?? "", pod), enabled: !!namespace });
 }
 
 export function useAgentsQuery(params: AgentsParams = {}) {

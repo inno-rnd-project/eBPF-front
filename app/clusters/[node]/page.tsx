@@ -1,28 +1,50 @@
-import { notFound } from "next/navigation";
+"use client";
 
+// ───────────────────────────────────────────────────────────────────────────
+// 노드 상세 — 실 API (react-query, 30s 갱신 · vitals 1s 폴링)
+//   UI 는 기존 패널/레이아웃 그대로, 데이터만 node-view 어댑터로 변환해 주입한다.
+//   미지원 신호는 각 컴포넌트의 empty state 로 남긴다.
+// ───────────────────────────────────────────────────────────────────────────
+
+import { useQuery } from "@tanstack/react-query";
+import { notFound } from "next/navigation";
+import { use } from "react";
+
+import { isNotFoundError } from "../../lib/api/client";
 import {
-  C_CALM,
-  C_CRIT,
-  C_NODATA,
-  C_WARN,
-  DISPLAY_STATUS_TONE,
-  getNode,
-  gpuFabric,
-  netobsAgentHealth,
-  nodeAlerts,
-  nodeDiagnosis,
-  nodeDropReasons,
-  nodeGpu,
-  nodeHealth,
-  nodeNetFlow,
-  nodeNoisyNeighbors,
-  nodeRetransByWorkload,
-  nodeServiceTopology,
-  nodeDisplayStatus,
-  nodeStageLatency,
-  podAnalytics,
-  podAnomaly,
-} from "../../lib/cluster";
+  toCpuPressureItems,
+  toDiagnosisPlaceholder,
+  toDropAgg,
+  toDropReasonRows,
+  toGpuInfo,
+  toNetFlow,
+  toNetobsAgent,
+  toNodeAlerts,
+  toNodeDiagnosis,
+  toNodeDisplayStatus,
+  toNodeHealth,
+  toNoisyRows,
+  toPodResourceRows,
+  toRetransRows,
+  toServiceTopology,
+  toStageLatency,
+  nicLinkOf,
+  podForWorkload,
+} from "../../lib/api/node-view";
+import {
+  gpuStatusQueryOptions,
+  nodeVitalsQueryOptions,
+  useAgentsQuery,
+  useBandwidthQuery,
+  useDropsQuery,
+  useIncidentsQuery,
+  useLatencyBreakdownQuery,
+  useNodeDetailQuery,
+  useNodeMapQuery,
+  useNodePodsQuery,
+  useNoisyNeighborQuery,
+  usePressureQuery,
+} from "../../lib/api/queries";
 import {
   AlertList,
   DiagnosisCard,
@@ -39,95 +61,93 @@ import {
   ScoreBars,
   StageLatency,
 } from "../../lib/charts";
-import { GpuViews } from "../../lib/gpu-topology";
-import { PodHoneycomb } from "../../lib/honeycomb";
+import { C_CALM, C_CRIT, C_NODATA, C_WARN, DISPLAY_STATUS_TONE } from "../../lib/cluster";
+import { NodeMapHoneycomb } from "../../lib/honeycomb";
 import { LiveArea, LiveVitals, type VitalTile } from "../../lib/live";
 import { ServiceTopology } from "../../lib/service-topology";
 import { AppShell, EntityHeader, SectionTitle } from "../../lib/shell";
 import { type TabDef, Tabs } from "../../lib/tabs";
-import { Card, LegendHex } from "../../lib/ui";
+import { Card, EmptyState, LegendHex } from "../../lib/ui";
 
-export default async function NodePage({
-  params,
-}: {
-  params: Promise<{ node: string }>;
-}) {
-  const { node: nodeName } = await params;
-  const node = getNode(decodeURIComponent(nodeName));
-  if (!node) notFound();
+export default function NodePage({ params }: { params: Promise<{ node: string }> }) {
+  const nodeName = decodeURIComponent(use(params).node);
 
-  const diagnosis = nodeDiagnosis(node);
-  const health = nodeHealth(node);
-  const alerts = nodeAlerts(node);
-  const noisy = nodeNoisyNeighbors(node);
-  const serviceTopo = nodeServiceTopology(node);
+  const mapQuery = useNodeMapQuery({ node: nodeName });
+  const detailQuery = useNodeDetailQuery(nodeName);
+  // vitals 만 1s 폴링 — 게이지·스트리밍 차트가 실측값을 그대로 흘린다 (synthetic=false)
+  const vitalsQuery = useQuery({ ...nodeVitalsQueryOptions({ node: nodeName }), refetchInterval: 1000, staleTime: 0 });
+  const podsQuery = useNodePodsQuery(nodeName);
+  const incidentsQuery = useIncidentsQuery({ node: nodeName });
+  const cpuPressureQuery = usePressureQuery({ dimension: "cpu", scope: "pod", node: nodeName, limit: 12 });
+  const dropsQuery = useDropsQuery({ node: nodeName, limit: 50 });
+  const egressQuery = useLatencyBreakdownQuery({ scope: "node", direction: "egress", node: nodeName });
+  const ingressQuery = useLatencyBreakdownQuery({ scope: "node", direction: "ingress", node: nodeName });
+  const bandwidthQuery = useBandwidthQuery({ node: nodeName, limit: 100 });
+  const noisyQuery = useNoisyNeighborQuery({ limit: 500 });
+  const agentsQuery = useAgentsQuery({ node: nodeName });
 
-  const live = node.pods.filter((p) => p.cpu >= 0);
-  const analytics = live.map((p) => ({ pod: p, a: podAnalytics(node, p) }));
-  // throttle 막대 — cpu 이상이 잡힌 파드는 severity 배지 + 원인 신호를 막대에 인라인 표시
-  const throttleItems = [...analytics]
-    .sort((x, y) => y.a.throttle - x.a.throttle)
-    .slice(0, 12)
-    .map((x) => {
-      const an = podAnomaly(node, x.pod);
-      const cpuAn = an?.kind === "cpu" ? an : null;
-      return {
-        label: x.pod.name,
-        value: x.a.throttle,
-        severity: cpuAn?.sev,
-        note: cpuAn?.ebpf.join(" · "),
-      };
-    });
-  const dropAgg = ["drop policy", "drop queue", "drop unknown", "retrans"].map(
-    (cat) => ({
-      label: cat,
-      value: analytics.reduce(
-        (s, x) => s + (x.a.drops.find((d) => d.category === cat)?.rate ?? 0),
-        0,
-      ),
-    }),
-  );
+  const mapNode = mapQuery.data?.nodes.find((n) => n.name === nodeName);
+  const isGpu = !!mapNode?.gpu;
+  const gpuStatusQuery = useQuery({ ...gpuStatusQueryOptions({ node: nodeName }), enabled: isGpu });
+
+  if (mapQuery.isError && isNotFoundError(mapQuery.error)) notFound();
+  if (mapQuery.isPending) return <PageLoading crumb={nodeName} message="노드 정보를 불러오는 중…" />;
+  if (!mapNode) {
+    return (
+      <PageLoading
+        crumb={nodeName}
+        message={mapQuery.error instanceof Error ? `노드 정보를 불러오지 못했습니다 — ${mapQuery.error.message}` : "노드 정보를 불러오지 못했습니다."}
+        error
+      />
+    );
+  }
+
+  const node = mapNode;
+  const podNames = node.pods.map((p) => p.pod);
+  const podSet = new Set(podNames);
+  const display = toNodeDisplayStatus(detailQuery.data, node);
+  const tone = DISPLAY_STATUS_TONE[display];
+  const incidents = incidentsQuery.data?.incidents ?? [];
+  const diagnosis = detailQuery.data ? toNodeDiagnosis(detailQuery.data, incidents, display) : toDiagnosisPlaceholder(node.name, detailQuery.isError);
+  const health = detailQuery.data ? toNodeHealth(detailQuery.data, isGpu) : null;
+  const alerts = toNodeAlerts(incidents, podSet);
+  const noisy = toNoisyRows(noisyQuery.data?.items, podSet);
+  const serviceTopo = toServiceTopology(node, bandwidthQuery.data, noisy);
+  const podRows = toPodResourceRows(podsQuery.data?.pods ?? []);
+  const liveCount = node.pods.filter((p) => !p.no_data).length;
+
+  const throttleItems = toCpuPressureItems(cpuPressureQuery.data);
+  const dropAgg = toDropAgg(dropsQuery.data);
 
   const podHref = (podName: string) => `/clusters/${node.name}/${podName}`;
+  const workloadHref = (label: string) => {
+    const pod = podForWorkload(label, podNames);
+    return pod ? podHref(pod) : `/clusters/${node.name}`;
+  };
   const dim = diagnosis.dimension;
-  const gpu = nodeGpu(node);
-  const tone = DISPLAY_STATUS_TONE[nodeDisplayStatus(node)];
+  const gpu = isGpu ? toGpuInfo(gpuStatusQuery.data, agentsQuery.data?.agents.find((a) => a.agent === "gpuobs"), nicLinkOf(bandwidthQuery.data, node.name)) : null;
 
-  // ── 노드 vitals (실시간 사용률) — 모든 노드 공통. Grafana Node Exporter 관례:
+  // ── 노드 vitals (실측 /node-vitals) — Grafana Node Exporter 관례:
   //    포화도(%)는 임계 색 게이지, 용량·카운트는 stat 타일. GPU 노드는 GPU util/mem
   //    게이지를, 비-GPU 노드는 Pods/Live stat 타일을 덧붙인다.
-  const cpuPct = live.length
-    ? Math.round(live.reduce((s, p) => s + p.cpu, 0) / live.length)
-    : 0;
-  const memPct = live.length
-    ? Math.round(live.reduce((s, p) => s + p.mem, 0) / live.length)
-    : 0;
-  const gpuUsagePct =
-    gpu && gpu.views.length
-      ? Math.round(
-          (gpu.views.reduce((s, v) => s + v.device.util, 0) /
-            gpu.views.length) *
-            100,
-        )
-      : 0;
-  const gpuMemUsedGB = gpu
-    ? gpu.views.reduce((s, v) => s + v.device.memUsedMB, 0) / 1024
-    : 0;
-  const gpuMemTotalGB = gpu
-    ? gpu.views.reduce((s, v) => s + v.device.memTotalMB, 0) / 1024
-    : 0;
-  const gpuMemPct =
-    gpuMemTotalGB > 0 ? Math.round((gpuMemUsedGB / gpuMemTotalGB) * 100) : 0;
+  const v = vitalsQuery.data;
+  const cpuPct = Math.round(v?.cpu_percent ?? 0);
+  const memPct = Math.round(v?.memory_percent ?? 0);
+  const gpuUsagePct = Math.round(v?.gpu_percent ?? 0);
+  const gpuMemUsedGB = (v?.gpu_memory_used_bytes ?? 0) / 1024 ** 3;
+  const gpuMemTotalGB = (v?.gpu_memory_total_bytes ?? 0) / 1024 ** 3;
+  const gpuMemPct = Math.round(v?.gpu_memory_percent ?? 0);
+  const gpuCount = mapNode.gpu_devices || gpu?.views.length || 0;
   const vitalTiles: VitalTile[] = [
-    { kind: "gauge", label: "CPU", pct: cpuPct, sub: "live 파드 평균" },
-    { kind: "gauge", label: "Memory", pct: memPct, sub: "live 파드 평균" },
-    ...(gpu
+    { kind: "gauge", label: "CPU", pct: cpuPct, sub: "limit 대비 파드 평균" },
+    { kind: "gauge", label: "Memory", pct: memPct, sub: "limit 대비 파드 평균" },
+    ...(isGpu
       ? ([
           {
             kind: "gauge",
             label: "GPU 사용률",
             pct: gpuUsagePct,
-            sub: `SM util · ${gpu.views.length} GPU 평균`,
+            sub: `SM util · ${gpuCount} GPU 평균`,
           },
           {
             kind: "gauge",
@@ -146,7 +166,7 @@ export default async function NodePage({
           {
             kind: "stat",
             label: "Live",
-            value: `${live.length}`,
+            value: `${liveCount}`,
             sub: "텔레메트리 수신",
           },
         ] as VitalTile[])),
@@ -169,7 +189,7 @@ export default async function NodePage({
       unit: "%",
       vol: 4,
     },
-    ...(gpu
+    ...(isGpu
       ? [
           {
             key: "gpu",
@@ -184,12 +204,12 @@ export default async function NodePage({
   ];
 
   // 네트워크 (송/수신 경로 · ip_version flow · 워크로드별 재전송 · drop reason)
-  const stageLat = nodeStageLatency(node);
-  const netFlow = nodeNetFlow(node);
-  const retransRows = nodeRetransByWorkload(node);
-  const dropRows = nodeDropReasons(node);
+  const stageLat = toStageLatency(egressQuery.data, ingressQuery.data);
+  const netFlow = toNetFlow(dropsQuery.data);
+  const retransRows = toRetransRows(dropsQuery.data);
+  const dropRows = toDropReasonRows(dropsQuery.data);
   // netobs-agent self-health (네트워크 eBPF agent)
-  const netobs = netobsAgentHealth(node);
+  const netobs = toNetobsAgent(agentsQuery.data?.agents.find((a) => a.agent === "netobs"));
 
   // CPU + 네트워크 상세를 한 곳에 모은 패널 (GPU 제외 — GPU는 GPUs/GPU Detail에서).
   // 넓은 캔버스를 채우도록 2-col 그리드, 폭이 큰 카드(경로 지연·드롭 테이블)는 span-2.
@@ -198,7 +218,7 @@ export default async function NodePage({
       <Card
         className="lg:col-span-2"
         title="CPU throttle score (Pod별)"
-        hint="CPU limit(cgroup quota)에 걸려 실행이 강제 대기(throttle)된 비율. 0 = throttle 없음, 1 = 거의 매 스케줄링 주기마다 대기. 색이 붉고 배지가 달린 파드가 실제 이상이며, 아래 ↳ 줄이 원인 신호입니다."
+        hint="파드별 CPU 압박(pressure) 점수 — 0 = 압박 없음, 1 = limit 에 상시 걸림. 색이 붉고 배지가 달린 파드가 백엔드가 elevated/high 로 판정한 파드입니다."
       >
         <ScoreBars items={throttleItems} kind="score" href={podHref} />
       </Card>
@@ -216,10 +236,11 @@ export default async function NodePage({
                 </span>
               </span>
             </div>
-            <StageLatency
-              stages={stageLat.tx}
-              bottleneck={stageLat.txBottleneck}
-            />
+            {stageLat.tx.length ? (
+              <StageLatency stages={stageLat.tx} bottleneck={stageLat.txBottleneck} />
+            ) : (
+              <EmptyState message="데이터 없음" />
+            )}
           </div>
           <div>
             <div className="mb-2 flex items-baseline justify-between">
@@ -233,10 +254,11 @@ export default async function NodePage({
                 </span>
               </span>
             </div>
-            <StageLatency
-              stages={stageLat.rx}
-              bottleneck={stageLat.rxBottleneck}
-            />
+            {stageLat.rx.length ? (
+              <StageLatency stages={stageLat.rx} bottleneck={stageLat.rxBottleneck} />
+            ) : (
+              <EmptyState message="데이터 없음" />
+            )}
           </div>
         </div>
       </Card>
@@ -251,7 +273,7 @@ export default async function NodePage({
           items={retransRows.map((r) => ({ label: r.workload, value: r.rate }))}
           kind="rate"
           unit="/s"
-          href={(label) => podHref(label.split("/")[1] ?? label)}
+          href={workloadHref}
         />
       </Card>
       <Card
@@ -291,10 +313,28 @@ export default async function NodePage({
       }
     : null;
 
+  const podsTabBody = (
+    <>
+      <Card>
+        <div className="mb-3 flex items-center justify-end gap-3 text-[11px] text-slate-500">
+          <LegendHex color={C_CALM} label="정상" />
+          <LegendHex color={C_WARN} label="Warn" />
+          <LegendHex color={C_CRIT} label="Crit" />
+          <LegendHex color={C_NODATA} label="N/A" />
+        </div>
+        <NodeMapHoneycomb node={node} />
+      </Card>
+      <Card
+        title="파드 자원 (Pod별)"
+        hint="CPU·메모리는 limit 대비 % (limit 없는 파드는 cores·working set 원값), 네트워크는 바이트율. 이상 파드 우선 정렬. 행 클릭 → 파드 상세."
+      >
+        <PodResourceTable rows={podRows} href={podHref} />
+      </Card>
+    </>
+  );
+
   if (gpu) {
     // ── GPU 노드 = "GPU rack" 관점 탭: GPUs · Pods · Resources · Topology · Events ──
-    const fabric = gpuFabric(node, gpu);
-
     tabs = [
       {
         id: "gpus",
@@ -304,17 +344,9 @@ export default async function NodePage({
         content: (
           <Card
             title="GPU 디바이스 (gpuobs)"
-            hint="Grid=디바이스 헬스 · Fabric=인터커넥트 · Matrix=topo -m. 클릭 → GPU Detail"
+            hint="디바이스 헬스 — 클릭 → GPU Detail. NVLink 패브릭/topo -m 은 미수집"
           >
-            {fabric ? (
-              <GpuViews
-                grid={<GpuCardGrid views={gpu.views} node={node.name} />}
-                fabric={fabric}
-                node={node.name}
-              />
-            ) : (
-              <GpuCardGrid views={gpu.views} node={node.name} />
-            )}
+            <GpuCardGrid views={gpu.views} node={node.name} />
           </Card>
         ),
       },
@@ -324,21 +356,7 @@ export default async function NodePage({
         badge: node.pods.length,
         content: (
           <div className="space-y-4">
-            <Card>
-              <div className="mb-3 flex items-center justify-end gap-3 text-[11px] text-slate-500">
-                <LegendHex color={C_CALM} label="정상" />
-                <LegendHex color={C_WARN} label="Warn" />
-                <LegendHex color={C_CRIT} label="Crit" />
-                <LegendHex color={C_NODATA} label="N/A" />
-              </div>
-              <PodHoneycomb node={node} />
-            </Card>
-            <Card
-              title="파드 자원 (Pod별)"
-              hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세."
-            >
-              <PodResourceTable node={node} href={podHref} />
-            </Card>
+            {podsTabBody}
             <Card
               title="GPU별 사용 파드"
               hint="이 노드의 GPU들에 어떤 파드가 올라가 있나 — 디바이스별 귀속"
@@ -351,7 +369,7 @@ export default async function NodePage({
       {
         id: "resources",
         label: "Resources",
-        alert: dim === "cpu" || dim === "net",
+        alert: dim === "cpu" || dim === "net" || dim === "latency",
         content: resourcesContent,
       },
       {
@@ -390,7 +408,7 @@ export default async function NodePage({
       tabs.splice(at + 1, 0, topologyTab);
     }
 
-    initialTab = node.status === "down" ? "events" : "gpus";
+    initialTab = display === "down" ? "events" : "gpus";
   } else {
     // ── 비-GPU 노드 — 기존 eBPF 상세 구조 유지 ──
     tabs = [
@@ -398,25 +416,7 @@ export default async function NodePage({
         id: "pods",
         label: "파드",
         badge: node.pods.length,
-        content: (
-          <div className="space-y-4">
-            <Card>
-              <div className="mb-3 flex items-center justify-end gap-3 text-[11px] text-slate-500">
-                <LegendHex color={C_CALM} label="정상" />
-                <LegendHex color={C_WARN} label="Warn" />
-                <LegendHex color={C_CRIT} label="Crit" />
-                <LegendHex color={C_NODATA} label="N/A" />
-              </div>
-              <PodHoneycomb node={node} />
-            </Card>
-            <Card
-              title="파드 자원 (Pod별)"
-              hint="CPU·메모리·네트워크 사용률과 상태 — 이상 파드 우선 정렬. 행 클릭 → 파드 상세."
-            >
-              <PodResourceTable node={node} href={podHref} />
-            </Card>
-          </div>
-        ),
+        content: <div className="space-y-4">{podsTabBody}</div>,
       },
       {
         id: "cpu",
@@ -425,7 +425,7 @@ export default async function NodePage({
         content: (
           <Card
             title="CPU throttle score (Pod별)"
-            hint="CPU limit(cgroup quota)에 걸려 실행이 강제 대기(throttle)된 비율. 0 = throttle 없음, 1 = 거의 매 스케줄링 주기마다 대기. 색이 붉고 배지가 달린 파드가 실제 이상이며, 아래 ↳ 줄이 원인 신호입니다."
+            hint="파드별 CPU 압박(pressure) 점수 — 0 = 압박 없음, 1 = limit 에 상시 걸림. 색이 붉고 배지가 달린 파드가 백엔드가 elevated/high 로 판정한 파드입니다."
           >
             <ScoreBars items={throttleItems} kind="score" href={podHref} />
           </Card>
@@ -434,7 +434,7 @@ export default async function NodePage({
       {
         id: "net",
         label: "네트워크",
-        alert: dim === "net",
+        alert: dim === "net" || dim === "latency",
         content: resourcesContent,
       },
       {
@@ -466,12 +466,16 @@ export default async function NodePage({
     }
 
     initialTab =
-      dim === "cpu" || dim === "net"
-        ? dim
-        : node.status === "down"
-          ? "alerts"
-          : "pods";
+      dim === "cpu"
+        ? "cpu"
+        : dim === "net" || dim === "latency"
+          ? "net"
+          : display === "down"
+            ? "alerts"
+            : "pods";
   }
+
+  const role = node.roles?.includes("control-plane") ? "control-plane" : "worker";
 
   return (
     <AppShell
@@ -482,26 +486,26 @@ export default async function NodePage({
     >
       <div className="space-y-6">
         <EntityHeader
-          kind={gpu ? "GPU 노드" : "노드"}
+          kind={isGpu ? "GPU 노드" : "노드"}
           title={node.name}
           statusDot={tone.dot}
           statusLabel={tone.label}
           pills={
             <>
               <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                {node.role}
+                {role}
               </span>
-              {gpu ? (
+              {isGpu ? (
                 <span className="rounded-md bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">
-                  GPU ×{gpu.views.length}
+                  GPU ×{gpuCount}
                 </span>
               ) : null}
             </>
           }
           facts={[
             { label: "Pods", value: node.pods.length },
-            { label: "Live", value: live.length },
-            ...(gpu
+            { label: "Live", value: liveCount },
+            ...(isGpu
               ? [
                   {
                     label: "GPU 메모리",
@@ -521,18 +525,18 @@ export default async function NodePage({
           <section className="lg:col-span-1">
             <SectionTitle
               right={
-                <span className="text-[11px] text-slate-500">live · 15m</span>
+                <span className="text-[11px] text-slate-500">live · 1s</span>
               }
             >
               Vitals
             </SectionTitle>
             <div className="grid grid-cols-2 gap-3">
-              <LiveVitals tiles={vitalTiles} />
+              {v ? <LiveVitals tiles={vitalTiles} synthetic={false} /> : null}
             </div>
           </section>
         </div>
 
-        {/* ── 실시간 사용률 — 스트리밍 시계열(노드 페이지엔 없던 차트) ── */}
+        {/* ── 실시간 사용률 — 스트리밍 시계열 (/node-vitals 1s 폴링) ── */}
         <section>
           <SectionTitle
             right={
@@ -542,14 +546,18 @@ export default async function NodePage({
             실시간 사용률
           </SectionTitle>
           <Card>
-            <LiveArea series={liveSeries} max={100} caption="live · 1s" />
+            {v ? (
+              <LiveArea series={liveSeries} max={100} caption="live · 1s" synthetic={false} />
+            ) : (
+              <EmptyState message={vitalsQuery.isError ? "데이터 없음" : "불러오는 중…"} />
+            )}
           </Card>
         </section>
 
         {/* ── Health: 차원별 합성 건강도(0–1) ── */}
         <section>
           <SectionTitle>Health</SectionTitle>
-          <HealthScores scores={health} />
+          {health ? <HealthScores scores={health} /> : <EmptyState message={detailQuery.isError ? "데이터 없음" : "불러오는 중…"} />}
         </section>
 
         {/* ── 상세 (탭으로 분류) ── */}
@@ -557,6 +565,17 @@ export default async function NodePage({
           <SectionTitle>상세 분석</SectionTitle>
           <Tabs tabs={tabs} initial={initialTab} />
         </section>
+      </div>
+    </AppShell>
+  );
+}
+
+function PageLoading({ crumb, message, error }: { crumb: string; message: string; error?: boolean }) {
+  return (
+    <AppShell crumbs={[{ label: "Anomaly Map", href: "/" }, { label: crumb }]}>
+      <div className="mt-16 flex flex-col items-center gap-2 text-slate-400">
+        {error ? null : <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-sky-500" />}
+        <span className={`text-[13px] ${error ? "font-semibold text-slate-600" : ""}`}>{message}</span>
       </div>
     </AppShell>
   );

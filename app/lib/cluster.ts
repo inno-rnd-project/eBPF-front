@@ -2079,7 +2079,7 @@ export function podDiagnosis(node: ClusterNode, pod: Pod): Diagnosis | null {
   };
 }
 
-export { DIM_LABEL, DIM_METRIC };
+export { DIM_ACTION, DIM_LABEL, DIM_METRIC };
 
 // 클러스터 전체 health (cluster overview)
 export function clusterHealth(): NodeHealth & { dominant: string } {

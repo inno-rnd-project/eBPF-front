@@ -1,4 +1,4 @@
-import ky from "ky";
+import ky, { HTTPError } from "ky";
 
 export const DEFAULT_API_BASE_URL = "http://101.79.72.42:19830/api/v1";
 
@@ -10,6 +10,10 @@ export function toSearchParams(params: Record<string, string | number | undefine
     (entry): entry is [string, string | number] => entry[1] !== undefined,
   );
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+export function isNotFoundError(error: unknown) {
+  return error instanceof HTTPError && error.response.status === 404;
 }
 
 export const api = ky.create({

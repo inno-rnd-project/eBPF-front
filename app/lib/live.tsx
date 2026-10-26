@@ -79,20 +79,21 @@ function seedBuffer(base: number, n: number, seed: number, vol: number, lo: numb
 }
 
 // 롤링 윈도 시계열 — 시드로 채워 시작하고, 틱마다 평균회귀 워크 한 점을 밀어넣는다.
+// synthetic=false 면 랜덤워크 없이 실측 base 를 그대로 밀어넣는다 (폴링되는 실데이터용).
 export function useLiveSeries(
   base: number,
-  opts?: { points?: number; seed?: number; vol?: number; lo?: number; hi?: number; pull?: number },
+  opts?: { points?: number; seed?: number; vol?: number; lo?: number; hi?: number; pull?: number; synthetic?: boolean },
 ): number[] {
-  const { points = 40, seed = 1, vol = 6, lo = 0, hi = 100, pull = 0.16 } = opts ?? {};
+  const { points = 40, seed = 1, vol = 6, lo = 0, hi = 100, pull = 0.16, synthetic = true } = opts ?? {};
   const tick = useTick();
   const reduce = useReducedMotion();
-  const [buf, setBuf] = useState<number[]>(() => seedBuffer(base, points, seed, vol, lo, hi));
+  const [buf, setBuf] = useState<number[]>(() => seedBuffer(base, points, seed, synthetic ? vol : 0, lo, hi));
   useEffect(() => {
     if (tick === 0 || reduce) return;
     setBuf((prev) => {
       const last = prev[prev.length - 1];
-      const noise = (Math.random() - 0.5) * 2 * vol;
-      const next = clamp(last + (base - last) * pull + noise, lo, hi);
+      const noise = synthetic ? (Math.random() - 0.5) * 2 * vol : 0;
+      const next = synthetic ? clamp(last + (base - last) * pull + noise, lo, hi) : clamp(base, lo, hi);
       return [...prev.slice(1), next];
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,14 +163,16 @@ function LiveGauge({
   sub,
   center,
   seed = 1,
+  synthetic = true,
 }: {
   label: string;
   pct: number;
   sub?: string;
   center?: string;
   seed?: number;
+  synthetic?: boolean;
 }) {
-  const buf = useLiveSeries(pct, { points: 32, seed, vol: 4, lo: 0, hi: 100, pull: 0.2 });
+  const buf = useLiveSeries(pct, { points: 32, seed, vol: 4, lo: 0, hi: 100, pull: 0.2, synthetic });
   const live = buf[buf.length - 1];
   const color = rampColor(live);
   const R = 42;
@@ -228,12 +231,13 @@ export type VitalTile =
   | { kind: "stat"; label: string; value: string; sub?: string; tone?: string };
 
 // 노드/파드 Vitals — 게이지는 라이브, stat 타일은 정적. (직렬화 가능한 tile 배열만 받음)
-export function LiveVitals({ tiles }: { tiles: VitalTile[] }) {
+// synthetic=false → 폴링된 실측값을 그대로 흘린다. 기본 true 는 mock 용 랜덤워크.
+export function LiveVitals({ tiles, synthetic = true }: { tiles: VitalTile[]; synthetic?: boolean }) {
   return (
     <>
       {tiles.map((t, i) =>
         t.kind === "gauge" ? (
-          <LiveGauge key={t.label} label={t.label} pct={t.pct} sub={t.sub} center={t.center} seed={i * 7 + 3} />
+          <LiveGauge key={t.label} label={t.label} pct={t.pct} sub={t.sub} center={t.center} seed={i * 7 + 3} synthetic={synthetic} />
         ) : (
           <StatTile key={t.label} label={t.label} value={t.value} sub={t.sub} tone={t.tone} />
         ),
@@ -260,17 +264,19 @@ export function LiveArea({
   points = 56,
   max = 100,
   caption,
+  synthetic = true,
 }: {
   series: StreamSeries[];
   height?: number;
   points?: number;
   max?: number;
   caption?: string;
+  synthetic?: boolean;
 }) {
   const tick = useTick();
   const reduce = useReducedMotion();
   const [bufs, setBufs] = useState<number[][]>(() =>
-    series.map((s, i) => seedBuffer(s.base, points, i * 131 + 7, s.vol ?? 6, 0, max)),
+    series.map((s, i) => seedBuffer(s.base, points, i * 131 + 7, synthetic ? (s.vol ?? 6) : 0, 0, max)),
   );
 
   useEffect(() => {
@@ -278,6 +284,7 @@ export function LiveArea({
     setBufs((prev) =>
       prev.map((b, i) => {
         const s = series[i];
+        if (!synthetic) return [...b.slice(1), clamp(s.base, 0, max)];
         const last = b[b.length - 1];
         const noise = (Math.random() - 0.5) * 2 * (s.vol ?? 6);
         const next = clamp(last + (s.base - last) * (s.pull ?? 0.14) + noise, 0, max);

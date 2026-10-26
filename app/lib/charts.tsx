@@ -7,14 +7,11 @@ import Link from "next/link";
 import {
   C_CRIT,
   C_WARN,
-  type ClusterNode,
   type Diagnosis,
   DIM_LABEL,
   DIM_METRIC,
   type CudaActivity,
   type DropReasonRow,
-  type Pod,
-  podAnomaly,
   type GpuDeviceView,
   type GpuEvent,
   type GpuInfo,
@@ -361,7 +358,7 @@ export function NoisyPanel({ rows, highlight }: { rows: NoisyNeighbor[]; highlig
 // ── Pod 자원 테이블 — 노드의 파드를 표로 (CPU/Mem/Net + 상태), 이상 우선 정렬.
 // 허니콤이 "건강 분포"라면 이 표는 "어느 파드가 무엇을 얼마나 쓰나"의 답.
 // Grafana K8s Nodes / New Relic host / GKE node 의 pods-on-node 테이블 관례.
-type PodState = "crit" | "warn" | "ok" | "nodata";
+export type PodState = "crit" | "warn" | "ok" | "nodata";
 const POD_STATE_TONE: Record<PodState, { dot: string; text: string; label: string }> = {
   crit: { dot: C_CRIT, text: "text-rose-600", label: "위험" },
   warn: { dot: C_WARN, text: "text-amber-600", label: "경고" },
@@ -370,17 +367,21 @@ const POD_STATE_TONE: Record<PodState, { dot: string; text: string; label: strin
 };
 const metricTone = (v: number) => (v >= 80 ? "text-rose-600" : v >= 60 ? "text-amber-600" : "text-slate-700");
 
-export function PodResourceTable({ node, href }: { node: ClusterNode; href: (pod: string) => string }) {
-  if (!node.pods.length) return <EmptyState message="파드 없음" />;
+// 셀 값 — pct 가 있으면 게이지 막대(% 표기), 없으면 원값 텍스트(cores·MiB·KB/s), null 이면 "—"
+export type PodMetricCell = { pct?: number; text: string } | null;
+export type PodResourceRow = {
+  pod: string;
+  state: PodState;
+  cpu: PodMetricCell;
+  mem: PodMetricCell;
+  net: PodMetricCell;
+  sortValue: number; // 같은 state 내 정렬 축 (내림차순)
+};
+
+export function PodResourceTable({ rows: input, href }: { rows: PodResourceRow[]; href: (pod: string) => string }) {
+  if (!input.length) return <EmptyState message="파드 없음" />;
   const rank: Record<PodState, number> = { crit: 0, warn: 1, ok: 2, nodata: 3 };
-  const rows = node.pods
-    .map((pod: Pod) => {
-      const noData = pod.cpu < 0;
-      const an = noData ? null : podAnomaly(node, pod);
-      const state: PodState = noData ? "nodata" : an ? an.sev : "ok";
-      return { pod, noData, state };
-    })
-    .sort((a, b) => rank[a.state] - rank[b.state] || b.pod.cpu - a.pod.cpu);
+  const rows = [...input].sort((a, b) => rank[a.state] - rank[b.state] || b.sortValue - a.sortValue);
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-[12px]">
@@ -394,31 +395,33 @@ export function PodResourceTable({ node, href }: { node: ClusterNode; href: (pod
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ pod, noData, state }, ri) => {
+          {rows.map(({ pod, state, cpu, mem, net }, ri) => {
             const tone = POD_STATE_TONE[state];
-            // Grafana table "gauge cell" — 값 뒤에 사용률 막대를 깔아 한눈에 비교.
-            const cell = (v: number) =>
-              noData ? (
+            // Grafana table "gauge cell" — 값 뒤에 사용률 막대를 깔아 한눈에 비교 (% 값만).
+            const cell = (c: PodMetricCell) =>
+              c == null ? (
                 <span className="flex h-full items-center justify-end pr-0.5 text-slate-300">—</span>
+              ) : c.pct == null ? (
+                <span className="flex h-6 items-center justify-end pr-1.5 text-slate-600">{c.text}</span>
               ) : (
                 <span className="relative flex h-6 items-center justify-end overflow-hidden rounded">
                   <span
                     className="anim-growx absolute inset-y-0 left-0 rounded"
-                    style={{ width: `${v}%`, backgroundColor: rampColor(v), opacity: 0.18, transformOrigin: "left center", animationDelay: `${Math.min(ri, 12) * 30}ms` }}
+                    style={{ width: `${Math.min(c.pct, 100)}%`, backgroundColor: rampColor(c.pct), opacity: 0.18, transformOrigin: "left center", animationDelay: `${Math.min(ri, 12) * 30}ms` }}
                   />
-                  <span className={`relative z-10 pr-1.5 ${metricTone(v)}`}>{v}%</span>
+                  <span className={`relative z-10 pr-1.5 ${metricTone(c.pct)}`}>{c.text}</span>
                 </span>
               );
             return (
-              <tr key={pod.name} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
+              <tr key={pod} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
                 <td className="py-1.5 pr-3">
-                  <Link href={href(pod.name)} className="font-mono font-medium text-slate-700 underline-offset-2 hover:text-sky-600 hover:underline">
-                    {pod.name}
+                  <Link href={href(pod)} className="font-mono font-medium text-slate-700 underline-offset-2 hover:text-sky-600 hover:underline">
+                    {pod}
                   </Link>
                 </td>
-                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(pod.cpu)}</td>
-                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(pod.mem)}</td>
-                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(pod.net)}</td>
+                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(cpu)}</td>
+                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(mem)}</td>
+                <td className="py-1.5 pr-3 text-right font-mono font-semibold tabular-nums">{cell(net)}</td>
                 <td className="py-1.5 text-right">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: tone.dot }} />
@@ -709,6 +712,16 @@ function AttributionBlind({ title, items }: { title: string; items: string[] }) 
   );
 }
 
+// 파드 링크 — 귀속 실패(pod "—") 프로세스는 링크 없이 텍스트로
+function PodLink({ node, pod }: { node: string; pod: string }) {
+  if (pod === "—") return <span className="font-mono text-slate-400" title="cgroup 기반 파드 귀속 실패">—</span>;
+  return (
+    <Link href={`/clusters/${node}/${pod}`} className="font-mono font-medium text-slate-700 underline-offset-2 hover:text-sky-600 hover:underline">
+      {pod}
+    </Link>
+  );
+}
+
 // ── Processes — PID별 GPU 귀속 테이블 ──────────────────────────────────────────
 function GpuProcessesPanel({ processes, perPodAvailable, node }: { processes: GpuProcess[]; perPodAvailable: boolean; node: string }) {
   if (!perPodAvailable || processes.length === 0) {
@@ -733,9 +746,7 @@ function GpuProcessesPanel({ processes, perPodAvailable, node }: { processes: Gp
             <tr key={p.pid} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
               <td className="py-1.5 pr-3 font-mono text-slate-500">{p.pid}</td>
               <td className="py-1.5 pr-3">
-                <Link href={`/clusters/${node}/${p.pod}`} className="font-mono font-medium text-slate-700 underline-offset-2 hover:text-sky-600 hover:underline">
-                  {p.pod}
-                </Link>
+                <PodLink node={node} pod={p.pod} />
               </td>
               <td className="max-w-[160px] truncate py-1.5 pr-3 font-mono text-[11px] text-slate-500" title={p.command}>{p.command}</td>
               <td className="py-1.5 pr-3 text-center">
@@ -790,9 +801,7 @@ function GpuPodsPanel({ view, perPodAvailable, node }: { view: GpuDeviceView; pe
             {rows.map((r) => (
               <tr key={r.pod} className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50/70">
                 <td className="py-1.5 pr-3">
-                  <Link href={`/clusters/${node}/${r.pod}`} className="font-mono font-medium text-slate-700 underline-offset-2 hover:text-sky-600 hover:underline">
-                    {r.pod}
-                  </Link>
+                  <PodLink node={node} pod={r.pod} />
                 </td>
                 <td className="py-1.5 pr-3 text-center font-mono text-slate-500">{r.procs}</td>
                 <td className="py-1.5 pr-3 text-right font-mono font-semibold text-slate-700">{Math.round(r.smUtil * 100)}%</td>

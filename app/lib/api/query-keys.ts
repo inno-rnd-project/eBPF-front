@@ -91,6 +91,9 @@ export const apiQueryKeys = {
   nodeVitals: (node: string, at?: string | number) =>
     [...apiQueryKeys.interference(), "node-vitals", node, at ?? "now"] as const,
   nodeDetail: (node: string) => [...apiQueryKeys.interference(), "node", node] as const,
+  nodePods: (node: string) => [...apiQueryKeys.interference(), "node", node, "pods"] as const,
+  podDetail: (namespace: string, pod: string) =>
+    [...apiQueryKeys.interference(), "pod", namespace, pod] as const,
   pressure: (
     dimension: string,
     scope?: string,
